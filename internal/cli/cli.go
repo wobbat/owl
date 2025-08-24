@@ -21,7 +21,7 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "owl",
-	Short: "A modern package manager for Arch Linux",
+	Short: "A modern AUR helper and package manager for Arch Linux",
 	Long:  "", // We'll handle help manually
 	Run: func(cmd *cobra.Command, args []string) {
 		// Check for help flag
@@ -64,6 +64,10 @@ var upgradeCmd = &cobra.Command{
 	Short:   "Upgrade all packages to latest versions",
 	Long:    `Upgrade all managed packages to their latest versions`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Check for --devel flag
+		if devel, _ := cmd.Flags().GetBool("devel"); devel {
+			options.Devel = true
+		}
 		handleUpgradeCommand()
 	},
 }
@@ -100,6 +104,31 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// gendbCmd represents the generate VCS database command
+var gendbCmd = &cobra.Command{
+	Use:   "gendb",
+	Short: "Generate VCS database for development packages",
+	Long:  `Generate a VCS database for development packages (-git, -hg, etc.) that were installed without Owl. This command should only be run once.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		handleGendbCommand()
+	},
+}
+
+// dotsCmd represents the dots command
+var dotsCmd = &cobra.Command{
+	Use:   "dots",
+	Short: "Check and sync only dotfiles configurations",
+	Long:  `Check and sync only dotfiles configurations without installing packages or running setup scripts`,
+	Run: func(cmd *cobra.Command, args []string) {
+		// Check for --dry-run flag
+		if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+			handleDotsCommand(true)
+		} else {
+			handleDotsCommand(false)
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(dryRunCmd)
@@ -107,6 +136,21 @@ func init() {
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(helpCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(gendbCmd)
+	rootCmd.AddCommand(dotsCmd)
+
+	// Add --devel flag to upgrade command
+	upgradeCmd.Flags().Bool("devel", false, "Check development packages (-git, -hg, etc.) for updates")
+
+	// Add --dry-run flag to dots command
+	dotsCmd.Flags().Bool("dry-run", false, "Preview dotfiles changes without making them")
+
+	// Add enhanced package manager commands
+	rootCmd.AddCommand(handlers.SearchCommand())
+	rootCmd.AddCommand(handlers.InstallCommand())
+	rootCmd.AddCommand(handlers.UpgradeCommand())
+	rootCmd.AddCommand(handlers.InfoCommand())
+	rootCmd.AddCommand(handlers.QueryCommand())
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&options.NoSpinner, "no-spinner", false, "Disable loading animations")
@@ -137,22 +181,42 @@ func Execute() error {
 // showHelp displays custom help information that matches the TypeScript version
 func showHelp() {
 	fmt.Println("Owl Package Manager")
-	fmt.Println("A modern package manager for Arch Linux with config management and setup script automation.\n")
+	fmt.Println("A modern AUR helper and package manager for Arch Linux with config management and setup script automation.")
 
 	fmt.Println("\x1b[1mUsage:\x1b[0m")
-	fmt.Println("  owl <command> [options]\n")
+	fmt.Println("  owl <command> [options]")
 
-	fmt.Println("\x1b[1mCommands:\x1b[0m")
+	fmt.Println("\x1b[1mConfig Management Commands:\x1b[0m")
 	globalUI.List([]string{
 		"apply          Install packages, copy configs, and run setup scripts",
 		"dry-run, dr    Preview what would be done without making changes",
-		"upgrade, up    Upgrade all packages to latest versions",
+		"dots           Check and sync only dotfiles configurations",
 		"uninstall      Remove all managed packages and configs",
+	}, types.ListOptions{
+		Indent: true,
+		Color:  func(s string) string { return "\x1b[34m" + s + "\x1b[0m" },
+	})
+
+	fmt.Println("\x1b[1m\nPackage Manager Commands:\x1b[0m")
+	globalUI.List([]string{
+		"search, s      Search for packages in repositories and AUR",
+		"install, i, S  Install packages from repositories or AUR",
+		"upgrade, u     Upgrade all packages to latest versions",
+		"info, Si       Show detailed information about a package",
+		"query, q, Q    Query installed packages",
+	}, types.ListOptions{
+		Indent: true,
+		Color:  func(s string) string { return "\x1b[35m" + s + "\x1b[0m" },
+	})
+
+	fmt.Println("\x1b[1m\nGeneral Commands:\x1b[0m")
+	globalUI.List([]string{
+		"gendb          Generate VCS database for development packages",
 		"help, --help   Show this help message",
 		"version, -v    Show version information",
 	}, types.ListOptions{
 		Indent: true,
-		Color:  func(s string) string { return "\x1b[34m" + s + "\x1b[0m" },
+		Color:  func(s string) string { return "\x1b[37m" + s + "\x1b[0m" },
 	})
 
 	fmt.Println("\x1b[1m\nOptions:\x1b[0m")
@@ -167,11 +231,15 @@ func showHelp() {
 	fmt.Println("\x1b[1m\nExamples:\x1b[0m")
 	globalUI.List([]string{
 		"owl                      # Apply all configurations (default)",
-		"owl apply                # Apply all configurations",
-		"owl dry-run              # Preview changes",
-		"owl upgrade              # Upgrade all packages",
-		"owl apply --no-spinner   # Apply without animations",
-		"owl upgrade --verbose    # Upgrade with full command output",
+		"owl search firefox       # Search for firefox packages",
+		"owl install yay          # Install yay from AUR",
+		"owl upgrade --devel      # Upgrade including development packages",
+		"owl info discord         # Show information about discord package",
+		"owl query --foreign      # List AUR packages",
+		"owl dots                 # Sync only dotfiles configurations",
+		"owl dots --dry-run       # Preview dotfiles changes",
+		"owl gendb                # Generate VCS database for development packages",
+		"owl dry-run              # Preview config changes",
 	}, types.ListOptions{
 		Indent: true,
 		Color:  func(s string) string { return "\x1b[32m" + s + "\x1b[0m" },
@@ -193,60 +261,82 @@ func showHelp() {
 // showVersion displays version information
 func showVersion() {
 	fmt.Println("Owl v1.0.0")
-	fmt.Println("\x1b[2mA modern package manager for Arch Linux\x1b[0m")
+	fmt.Println("\x1b[2mA modern AUR helper and package manager for Arch Linux\x1b[0m")
+}
+
+// setupEnvironment performs common setup tasks for all commands
+func setupEnvironment() error {
+	if err := utils.EnsureOwlDirectories(); err != nil {
+		return fmt.Errorf("failed to setup directories: %w", err)
+	}
+	return nil
+}
+
+// setupEnvironmentWithPackageManager performs setup including package manager verification
+func setupEnvironmentWithPackageManager() error {
+	if err := setupEnvironment(); err != nil {
+		return err
+	}
+	if err := packages.EnsurePackageManagerReady(); err != nil {
+		return fmt.Errorf("failed to verify package manager: %w", err)
+	}
+	return nil
+}
+
+// handleCommandError handles command execution errors consistently
+func handleCommandError(err error, message string) {
+	if err != nil {
+		globalUI.Error(fmt.Sprintf("%s: %v", message, err))
+		os.Exit(1)
+	}
 }
 
 // handleApplyCommand handles the apply command (both normal and dry-run)
 func handleApplyCommand(dryRun bool) {
-	// Setup Owl environment first
-	if err := utils.EnsureOwlDirectories(); err != nil {
-		globalUI.Error(fmt.Sprintf("Failed to setup directories: %v", err))
+	if err := setupEnvironmentWithPackageManager(); err != nil {
+		globalUI.Error(err.Error())
 		os.Exit(1)
 	}
 
-	if err := packages.EnsureYayInstalled(); err != nil {
-		globalUI.Error(fmt.Sprintf("Failed to ensure yay is installed: %v", err))
-		os.Exit(1)
-	}
-
-	// Execute the apply command
-	if err := handlers.HandleApplyCommand(dryRun, options); err != nil {
-		globalUI.Error(fmt.Sprintf("Apply command failed: %v", err))
-		os.Exit(1)
-	}
+	handleCommandError(handlers.HandleApplyCommand(dryRun, options), "Apply command failed")
 }
 
 // handleUpgradeCommand handles the upgrade command
 func handleUpgradeCommand() {
-	// Setup Owl environment first
-	if err := utils.EnsureOwlDirectories(); err != nil {
-		globalUI.Error(fmt.Sprintf("Failed to setup directories: %v", err))
+	if err := setupEnvironmentWithPackageManager(); err != nil {
+		globalUI.Error(err.Error())
 		os.Exit(1)
 	}
 
-	if err := packages.EnsureYayInstalled(); err != nil {
-		globalUI.Error(fmt.Sprintf("Failed to ensure yay is installed: %v", err))
-		os.Exit(1)
-	}
-
-	// Execute the upgrade command
-	if err := handlers.HandleUpgradeCommand(options); err != nil {
-		globalUI.Error(fmt.Sprintf("Upgrade command failed: %v", err))
-		os.Exit(1)
-	}
+	handleCommandError(handlers.HandleUpgradeCommand(options), "Upgrade command failed")
 }
 
 // handleUninstallCommand handles the uninstall command
 func handleUninstallCommand() {
-	// Setup Owl environment first
-	if err := utils.EnsureOwlDirectories(); err != nil {
-		globalUI.Error(fmt.Sprintf("Failed to setup directories: %v", err))
+	if err := setupEnvironment(); err != nil {
+		globalUI.Error(err.Error())
 		os.Exit(1)
 	}
 
-	// Execute the uninstall command
-	if err := handlers.HandleUninstallCommand(options); err != nil {
-		globalUI.Error(fmt.Sprintf("Uninstall command failed: %v", err))
+	handleCommandError(handlers.HandleUninstallCommand(options), "Uninstall command failed")
+}
+
+// handleGendbCommand handles the generate VCS database command
+func handleGendbCommand() {
+	if err := setupEnvironmentWithPackageManager(); err != nil {
+		globalUI.Error(err.Error())
 		os.Exit(1)
 	}
+
+	handleCommandError(handlers.HandleGendbCommand(globalUI), "Generate VCS database command failed")
+}
+
+// handleDotsCommand handles the dots command (dotfiles only)
+func handleDotsCommand(dryRun bool) {
+	if err := setupEnvironment(); err != nil {
+		globalUI.Error(err.Error())
+		os.Exit(1)
+	}
+
+	handleCommandError(handlers.HandleDotsCommand(dryRun, options), "Dots command failed")
 }

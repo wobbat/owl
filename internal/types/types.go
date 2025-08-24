@@ -26,12 +26,22 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
-// PackageInfo represents information about a package
+// PackageInfo represents detailed information about a package
 type PackageInfo struct {
-	Name             string `json:"name"`
-	InstalledVersion string `json:"installed_version,omitempty"`
-	AvailableVersion string `json:"available_version,omitempty"`
-	Status           string `json:"status"` // not_installed, up_to_date, outdated
+	Name             string  `json:"name"`
+	Version          string  `json:"version"`
+	InstalledVersion string  `json:"installed_version,omitempty"`
+	AvailableVersion string  `json:"available_version,omitempty"`
+	Description      string  `json:"description"`
+	URL              string  `json:"url"`
+	Repository       string  `json:"repository"`
+	PackageBase      string  `json:"package_base,omitempty"`
+	Maintainer       string  `json:"maintainer,omitempty"`
+	Votes            int     `json:"votes,omitempty"`
+	Popularity       float64 `json:"popularity,omitempty"`
+	OutOfDate        bool    `json:"out_of_date"`
+	Installed        bool    `json:"installed"`
+	Status           string  `json:"status"` // not_installed, up_to_date, outdated
 }
 
 // PackageAction represents an action to be taken on a package
@@ -80,4 +90,50 @@ type CommandOptions struct {
 	NoSpinner bool
 	Verbose   bool
 	Debug     bool
+	Devel     bool // Check development packages for updates
+}
+
+// SearchOptions represents options for package searching
+type SearchOptions struct {
+	AUROnly        bool
+	RepoOnly       bool
+	AURSearchLimit int
+}
+
+// ResolveOptions represents options for dependency resolution
+type ResolveOptions struct {
+	IncludeOptional bool
+	SkipMakeDeps    bool
+	ForceReinstall  bool
+}
+
+// InstallOptions represents options for package installation
+type InstallOptions struct {
+	AsDeps     bool
+	AsExplicit bool
+	NoConfirm  bool
+	Needed     bool
+}
+
+// UpgradeOptions represents options for system upgrade
+type UpgradeOptions struct {
+	Devel      bool
+	TimeUpdate bool
+	NoConfirm  bool
+}
+
+// QueryOptions represents options for package querying
+type QueryOptions struct {
+	Foreign    bool
+	Explicit   bool
+	Deps       bool
+	Unrequired bool
+	Search     []string
+}
+
+// ProgressBarOptions represents options for progress bar configuration
+type ProgressBarOptions struct {
+	Enabled bool
+	Width   int
+	Color   func(string) string
 }

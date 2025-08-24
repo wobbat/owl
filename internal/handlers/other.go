@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"owl/internal/packages"
 	"owl/internal/types"
@@ -24,27 +23,38 @@ func HandleUpgradeCommand(options *types.CommandOptions) error {
 		Enabled: !options.NoSpinner,
 	})
 
-	// Get outdated packages using yay -Qu
-	cmd := exec.Command("yay", "-Qu")
-	output, err := cmd.Output()
-
-	var outdatedPackages []string
-	if err == nil && len(output) > 0 {
-		lines := strings.Split(string(output), "\n")
-		var packageNames []string
-		for _, line := range lines {
-			if line != "" {
-				parts := strings.Fields(line)
-				if len(parts) > 0 {
-					packageNames = append(packageNames, parts[0])
-				}
-			}
-		}
-		outdatedPackages = utils.Compact(packageNames)
-	} else {
-		// If command fails or no output, assume no packages to upgrade
-		outdatedPackages = []string{}
+	// Get outdated packages using ALPM manager
+	alpmMgr, err := packages.NewALPMManager()
+	if err != nil {
+		analysisSpinner.Fail("Failed to initialize package manager")
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
 	}
+	defer alpmMgr.Release()
+
+	// Get AUR updates with devel checking if enabled
+	aurUpdates, err := alpmMgr.GetAURUpdatesWithDevel(options.Devel)
+	if err != nil {
+		analysisSpinner.Fail("Failed to check AUR packages")
+		return fmt.Errorf("failed to check AUR updates: %w", err)
+	}
+
+	// Filter packages that need updates
+	var outdatedPackages []string
+	for _, update := range aurUpdates {
+		if update.NeedsUpdate {
+			outdatedPackages = append(outdatedPackages, update.Name)
+		}
+	}
+
+	// Also get outdated official packages
+	officialOutdated, err := alpmMgr.GetOutdatedPackages()
+	if err != nil {
+		analysisSpinner.Fail("Failed to check official packages")
+		return fmt.Errorf("failed to check official packages: %w", err)
+	}
+
+	// Combine both lists
+	outdatedPackages = append(outdatedPackages, officialOutdated...)
 
 	analysisSpinner.Stop(fmt.Sprintf("Found %d packages to upgrade", len(outdatedPackages)))
 
@@ -152,4 +162,106 @@ func HandleUninstallCommand(options *types.CommandOptions) error {
 
 	globalUI.Celebration("All managed packages removed successfully!")
 	return nil
+}
+
+// HandleGendbCommand handles the generate VCS database command
+func HandleGendbCommand(globalUI *ui.UI) error {
+	globalUI.Header("Generate VCS Database")
+
+	// Create VCS store
+	vcsStore, err := packages.NewVCSStore()
+	if err != nil {
+		return fmt.Errorf("failed to initialize VCS store: %w", err)
+	}
+
+	// Get ALPM manager
+	alpmMgr, err := packages.NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+	}
+
+	analysisSpinner := ui.NewSpinner("Analyzing installed AUR packages for VCS sources...", types.SpinnerOptions{
+		Enabled: true,
+	})
+
+	// Get AUR packages
+	aurPackages, err := alpmMgr.GetAURPackages()
+	if err != nil {
+		analysisSpinner.Fail("Failed to get AUR packages")
+		return fmt.Errorf("failed to get AUR packages: %w", err)
+	}
+
+	var vcsPackages []string
+	var processedCount int
+
+	for _, pkgName := range aurPackages {
+		if packages.IsGitPackage(pkgName) {
+			vcsPackages = append(vcsPackages, pkgName)
+		}
+		processedCount++
+	}
+
+	analysisSpinner.Stop(fmt.Sprintf("Found %d VCS packages out of %d AUR packages", len(vcsPackages), len(aurPackages)))
+
+	if len(vcsPackages) == 0 {
+		globalUI.Ok("No VCS packages found")
+		return nil
+	}
+
+	// Generate database for each VCS package
+	generateSpinner := ui.NewSpinner("Generating VCS database...", types.SpinnerOptions{
+		Enabled: true,
+	})
+
+	var generatedCount int
+	for _, pkgName := range vcsPackages {
+		// Download PKGBUILD and extract VCS info
+		if err := generateVCSInfoForPackage(pkgName, vcsStore); err != nil {
+			// Don't fail the whole operation for individual packages
+			continue
+		}
+		generatedCount++
+	}
+
+	generateSpinner.Stop(fmt.Sprintf("Generated VCS database for %d packages", generatedCount))
+
+	if err := vcsStore.Save(); err != nil {
+		return fmt.Errorf("failed to save VCS database: %w", err)
+	}
+
+	globalUI.Success(fmt.Sprintf("VCS database generated for %d development packages", generatedCount))
+	globalUI.Info("Development package updates can now be checked with future upgrade commands")
+	return nil
+}
+
+// generateVCSInfoForPackage downloads PKGBUILD and extracts VCS info for a package
+func generateVCSInfoForPackage(packageName string, vcsStore *packages.VCSStore) error {
+	// Create temporary directory
+	tmpDir := fmt.Sprintf("/tmp/gowl-gendb-%s", packageName)
+	if err := os.RemoveAll(tmpDir); err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return err
+	}
+
+	// Clone AUR repository to get PKGBUILD
+	gitURL := fmt.Sprintf("https://aur.archlinux.org/%s.git", packageName)
+	gitCmd := exec.Command("git", "clone", "--depth=1", gitURL, tmpDir)
+
+	if err := gitCmd.Run(); err != nil {
+		return err
+	}
+
+	// Read PKGBUILD
+	pkgbuildPath := fmt.Sprintf("%s/PKGBUILD", tmpDir)
+	pkgbuildContent, err := os.ReadFile(pkgbuildPath)
+	if err != nil {
+		return err
+	}
+
+	// Update VCS info
+	return vcsStore.UpdatePackageInfo(packageName, string(pkgbuildContent))
 }

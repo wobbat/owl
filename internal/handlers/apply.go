@@ -14,6 +14,56 @@ import (
 	"owl/internal/ui"
 )
 
+// HandleDotsCommand handles the dots command (dotfiles only)
+func HandleDotsCommand(dryRun bool, options *types.CommandOptions) error {
+	globalUI := ui.NewUI()
+
+	// Get hostname
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("failed to get hostname: %w", err)
+	}
+
+	// Load and parse all configuration files for this host
+	configResult, err := config.LoadConfigForHost(hostname)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Extract only dotfile configs
+	var allDotfileConfigs []types.ConfigMapping
+
+	for _, entry := range configResult.Entries {
+		allDotfileConfigs = append(allDotfileConfigs, entry.Configs...)
+	}
+
+	globalUI.Header(func() string {
+		if dryRun {
+			return "Dotfiles dry run"
+		}
+		return "Dotfiles sync"
+	}())
+
+	// Process dotfiles configurations
+	if len(allDotfileConfigs) > 0 {
+		err := processConfigs(allDotfileConfigs, configResult.Entries, dryRun, globalUI)
+		if err != nil {
+			return err
+		}
+	} else {
+		globalUI.Info("No dotfiles configurations found")
+	}
+
+	// Show completion message
+	if dryRun {
+		globalUI.Success("Dotfiles dry run completed successfully - no changes made")
+	} else {
+		globalUI.Celebration(":: Dotfiles sync complete ::")
+	}
+
+	return nil
+}
+
 // HandleApplyCommand handles the apply command (both normal and dry-run modes)
 func HandleApplyCommand(dryRun bool, options *types.CommandOptions) error {
 	globalUI := ui.NewUI()
@@ -254,18 +304,30 @@ func removePackages(toRemove []types.PackageAction, options *types.CommandOption
 
 // upgradeSystemPackages upgrades system packages
 func upgradeSystemPackages(options *types.CommandOptions, globalUI *ui.UI) error {
-	spinner := ui.NewSpinner("Upgrading system packages...", types.SpinnerOptions{Enabled: !options.NoSpinner && !options.Verbose})
+	spinner := ui.NewSpinner("Synchronizing package databases", types.SpinnerOptions{
+		Enabled: !options.NoSpinner && !options.Verbose,
+	})
+
 	fmt.Println("Performing system maintenance!")
 
-	err := packages.UpgradeAllPackages(options.Verbose)
+	var progressCallback func(string)
+	if !options.Verbose && spinner != nil {
+		progressCallback = func(message string) {
+			spinner.Update(message)
+		}
+	}
+
+	err := packages.UpgradeAllPackagesWithProgress(options.Verbose, progressCallback)
 	if err != nil {
-		spinner.Fail("Upgrade failed")
+		if spinner != nil {
+			spinner.Fail("Upgrade failed")
+		}
 		return fmt.Errorf("failed to upgrade system: %w", err)
 	}
 
 	if options.Verbose {
 		fmt.Printf("  %s All packages upgraded to latest versions\n", ui.Icon.Ok)
-	} else {
+	} else if spinner != nil {
 		spinner.Stop("-> done!")
 	}
 
@@ -278,14 +340,6 @@ func installNewPackages(toInstall []types.PackageAction, configEntries []types.C
 	globalUI.InstallHeader()
 
 	for _, pkg := range toInstall {
-		var packageEntry *types.ConfigEntry
-		for i := range configEntries {
-			if configEntries[i].Package == pkg.Name {
-				packageEntry = &configEntries[i]
-				break
-			}
-		}
-
 		hasConfigs := false
 		for _, cf := range allConfigs {
 			if contains(cf.Source, pkg.Name) {
@@ -294,11 +348,30 @@ func installNewPackages(toInstall []types.PackageAction, configEntries []types.C
 			}
 		}
 
-		globalUI.PackageInstallProgress(pkg.Name, hasConfigs, true, packageEntry)
+		// Create a spinner that will be updated with progress
+		spinner := ui.NewSpinner(fmt.Sprintf("Preparing %s", pkg.Name), types.SpinnerOptions{
+			Enabled: !options.NoSpinner && !options.Verbose,
+		})
 
-		err := packages.InstallPackages([]string{pkg.Name}, options.Verbose, !options.Verbose)
+		var progressCallback func(string)
+		if !options.Verbose {
+			progressCallback = func(message string) {
+				spinner.Update(message)
+			}
+		}
+
+		// Use the new progress-aware installation
+		err := packages.InstallPackagesWithProgress([]string{pkg.Name}, options.Verbose, !options.Verbose, progressCallback)
+
 		if err != nil {
+			if !options.Verbose {
+				spinner.Fail(fmt.Sprintf("Failed: %v", err))
+			}
 			return fmt.Errorf("failed to install %s: %w", pkg.Name, err)
+		}
+
+		if !options.Verbose {
+			spinner.Stop("installed")
 		}
 
 		globalUI.PackageInstallComplete(pkg.Name, hasConfigs)

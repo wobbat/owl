@@ -30,10 +30,9 @@ const (
 	ExitFailure = 1
 )
 
-// Package manager commands
+// Package management
 const (
-	Yay    = "yay"
-	Pacman = "pacman"
+	ALPM = "alpm" // Using libalpm for package operations
 )
 
 // Default protected packages that should never be auto-removed
@@ -59,7 +58,6 @@ const (
 	ErrorConfigNotFound       = "Configuration file not found"
 	ErrorPackageInstallFailed = "Package installation failed"
 	ErrorPackageRemovalFailed = "Package removal failed"
-	ErrorYayNotFound          = "yay not found. Installing yay..."
 	ErrorInvalidConfig        = "Invalid configuration"
 	ErrorCircularDependency   = "Circular dependency detected"
 )

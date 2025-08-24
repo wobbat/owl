@@ -14,47 +14,22 @@ import (
 	"owl/internal/types"
 )
 
-// EnsureYayInstalled ensures that yay package manager is installed
-func EnsureYayInstalled() error {
-	// Check if yay is already installed
-	if _, err := exec.LookPath("yay"); err == nil {
-		return nil
+// EnsurePackageManagerReady ensures that the package manager is ready for use
+func EnsurePackageManagerReady() error {
+	// With go-alpm, we use libalpm for most operations but still need pacman for AUR building
+	// Just verify that pacman and basic tools are available
+	if _, err := exec.LookPath("pacman"); err != nil {
+		return fmt.Errorf("pacman not found on system")
 	}
 
-	// Install yay using pacman
-	fmt.Println("Installing yay package manager...")
-
-	// First, update pacman keyring
-	cmd := exec.Command("sudo", "pacman", "-Sy", "--noconfirm", "archlinux-keyring")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to update archlinux keyring: %w", err)
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git not found - required for AUR packages")
 	}
 
-	// Install git and base-devel if not present
-	cmd = exec.Command("sudo", "pacman", "-S", "--noconfirm", "git", "base-devel")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to install git and base-devel: %w", err)
+	if _, err := exec.LookPath("makepkg"); err != nil {
+		return fmt.Errorf("makepkg not found - required for AUR packages")
 	}
 
-	// Clone and install yay
-	tempDir := "/tmp/yay-install"
-	os.RemoveAll(tempDir)
-
-	cmd = exec.Command("git", "clone", "https://aur.archlinux.org/yay.git", tempDir)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to clone yay repository: %w", err)
-	}
-
-	cmd = exec.Command("makepkg", "-si", "--noconfirm")
-	cmd.Dir = tempDir
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to build and install yay: %w", err)
-	}
-
-	// Clean up
-	os.RemoveAll(tempDir)
-
-	fmt.Println("yay installed successfully")
 	return nil
 }
 
@@ -100,26 +75,46 @@ func AnalyzePackages(configuredPackages []string) ([]types.PackageAction, error)
 	return actions, nil
 }
 
-// InstallPackages installs a list of packages using yay
+// InstallPackages installs a list of packages using ALPM/pacman
 func InstallPackages(packages []string, verbose, quiet bool) error {
 	if len(packages) == 0 {
 		return nil
 	}
 
-	args := []string{"-S", "--noconfirm"}
-	args = append(args, packages...)
+	alpmMgr, err := NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+	}
+	defer alpmMgr.Release()
 
-	cmd := exec.Command("yay", args...)
-
-	if verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	} else if quiet {
-		cmd.Stdout = nil
-		cmd.Stderr = nil
+	for _, pkg := range packages {
+		if err := alpmMgr.InstallPackage(pkg, verbose && !quiet); err != nil {
+			return fmt.Errorf("failed to install package %s: %w", pkg, err)
+		}
 	}
 
-	return cmd.Run()
+	return nil
+}
+
+// InstallPackagesWithProgress installs packages with progress reporting
+func InstallPackagesWithProgress(packages []string, verbose, quiet bool, progressCallback func(string)) error {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	alpmMgr, err := NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+	}
+	defer alpmMgr.Release()
+
+	for _, pkg := range packages {
+		if err := alpmMgr.InstallPackageWithProgress(pkg, verbose && !quiet, progressCallback); err != nil {
+			return fmt.Errorf("failed to install package %s: %w", pkg, err)
+		}
+	}
+
+	return nil
 }
 
 // RemoveUnmanagedPackages removes packages that are no longer managed
@@ -128,20 +123,22 @@ func RemoveUnmanagedPackages(packages []string, quiet bool) error {
 		return nil
 	}
 
-	args := []string{"-Rns", "--noconfirm"}
-	args = append(args, packages...)
+	alpmMgr, err := NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+	}
+	defer alpmMgr.Release()
 
-	cmd := exec.Command("yay", args...)
-
-	if quiet {
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+	for _, pkg := range packages {
+		if !quiet {
+			fmt.Printf("Removing package: %s\n", pkg)
+		}
+		if err := alpmMgr.RemovePackage(pkg); err != nil {
+			return fmt.Errorf("failed to remove package %s: %w", pkg, err)
+		}
 	}
 
-	return cmd.Run()
+	return nil
 }
 
 // UpdateManagedPackages updates the managed packages lock file
@@ -273,36 +270,36 @@ func saveManagedPackages(managedLock *types.ManagedLock) error {
 
 // getInstalledPackages returns a list of all installed packages
 func getInstalledPackages() ([]string, error) {
-	cmd := exec.Command("pacman", "-Qq")
-	output, err := cmd.Output()
+	// Use ALPM instead of pacman command
+	alpmMgr, err := NewALPMManager()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get installed packages: %w", err)
+		return nil, fmt.Errorf("failed to initialize ALPM manager: %w", err)
 	}
+	defer alpmMgr.Release()
 
-	var packages []string
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		pkg := strings.TrimSpace(scanner.Text())
-		if pkg != "" {
-			packages = append(packages, pkg)
-		}
-	}
-
-	return packages, scanner.Err()
+	return alpmMgr.GetInstalledPackages()
 }
 
 // UpgradeAllPackages upgrades all packages to their latest versions
 func UpgradeAllPackages(verbose bool) error {
-	args := []string{"-Syu", "--noconfirm"}
-
-	cmd := exec.Command("yay", args...)
-
-	if verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+	alpmMgr, err := NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
 	}
+	defer alpmMgr.Release()
 
-	return cmd.Run()
+	return alpmMgr.UpgradeSystem(verbose)
+}
+
+// UpgradeAllPackagesWithProgress upgrades all packages with progress reporting
+func UpgradeAllPackagesWithProgress(verbose bool, progressCallback func(string)) error {
+	alpmMgr, err := NewALPMManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+	}
+	defer alpmMgr.Release()
+
+	return alpmMgr.UpgradeSystemWithProgress(verbose, progressCallback)
 }
 
 // LoadManagedPackages loads the managed packages lock file (exported version)

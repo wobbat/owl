@@ -151,13 +151,13 @@ func (u *UI) PackageInstallProgress(packageName string, hasDotfiles bool, stream
 		// Show package installation progress
 		fmt.Printf("  Package - %s", muted("installing..."))
 		time.Sleep(time.Duration(constants.PackageInstallDelay) * time.Millisecond)
-		fmt.Printf("\r  Package - %s     \n", success("installed"))
+		fmt.Printf("\r\033[K  Package - %s\n", success("installed"))
 
 		// Show dotfiles installation if needed
 		if hasDotfiles {
 			fmt.Printf("  Dotfiles - %s", muted("installing..."))
 			time.Sleep(time.Duration(constants.DotfilesInstallDelay) * time.Millisecond)
-			fmt.Printf("\r  Dotfiles - %s     \n", success("installed"))
+			fmt.Printf("\r\033[K  Dotfiles - %s\n", success("installed"))
 		}
 
 		fmt.Println()
@@ -167,7 +167,7 @@ func (u *UI) PackageInstallProgress(packageName string, hasDotfiles bool, stream
 // PackageInstallComplete marks package installation as complete
 func (u *UI) PackageInstallComplete(packageName string, hasDotfiles bool) {
 	if hasDotfiles {
-		fmt.Printf("  Dotfiles - %s     \n", success("installed"))
+		fmt.Printf("\r\033[K  Dotfiles - %s\n", success("installed"))
 	}
 	fmt.Println()
 }
@@ -287,13 +287,16 @@ func (s *Spinner) animate() {
 			frame := constants.SpinnerFrames[frameIndex]
 			frameIndex = (frameIndex + 1) % len(constants.SpinnerFrames)
 
+			// Clear the line first, then print new content
+			fmt.Print("\r\033[K")
+
 			// Check if this is a package installation or dotfiles spinner for proper indentation
 			if strings.Contains(s.text, "Package - installing") ||
 				strings.Contains(s.text, "Dotfiles - checking") ||
 				strings.Contains(s.text, "Dotfiles - syncing") {
-				fmt.Printf("\r  %s %s  ", s.color(frame), s.text)
+				fmt.Printf("  %s %s", s.color(frame), s.text)
 			} else {
-				fmt.Printf("\r%s %s  ", s.color(frame), s.color(s.text))
+				fmt.Printf("%s %s", s.color(frame), s.color(s.text))
 			}
 			s.mu.Unlock()
 		}
@@ -332,13 +335,13 @@ func (s *Spinner) Stop(suffix string) {
 
 	// For package installs, show "Package - installed" format
 	if strings.Contains(s.text, "Package - installing") {
-		fmt.Printf("\r  Package - %s %s%s     \n", success("installed"), timing, message)
+		fmt.Printf("\r\033[K  Package - %s %s%s\n", success("installed"), timing, message)
 	} else if strings.Contains(s.text, "Dotfiles - checking") {
-		fmt.Printf("\r  Dotfiles - %s %s%s     \n", success("up to date"), timing, message)
+		fmt.Printf("\r\033[K  Dotfiles - %s %s%s\n", success("up to date"), timing, message)
 	} else if strings.Contains(s.text, "Dotfiles - syncing") {
-		fmt.Printf("\r  Dotfiles - %s %s%s     \n", success("synced"), timing, message)
+		fmt.Printf("\r\033[K  Dotfiles - %s %s%s\n", success("synced"), timing, message)
 	} else {
-		fmt.Printf("\r%s %s %s%s\n", Icon.Ok, success(s.text), timing, message)
+		fmt.Printf("\r\033[K%s %s %s%s\n", Icon.Ok, success(s.text), timing, message)
 	}
 }
 
@@ -372,12 +375,126 @@ func (s *Spinner) Fail(reason string) {
 
 	// For package installs, show "Package - failed" format
 	if strings.Contains(s.text, "Package - installing") {
-		fmt.Printf("\r  Package - %s%s\n", errColor("failed"), message)
+		fmt.Printf("\r\033[K  Package - %s%s\n", errColor("failed"), message)
 	} else if strings.Contains(s.text, "Dotfiles - checking") || strings.Contains(s.text, "Dotfiles - syncing") {
-		fmt.Printf("\r  Dotfiles - %s%s\n", errColor("failed"), message)
+		fmt.Printf("\r\033[K  Dotfiles - %s%s\n", errColor("failed"), message)
 	} else {
-		fmt.Printf("\r%s %s%s\n", Icon.Err, errColor(s.text), message)
+		fmt.Printf("\r\033[K%s %s%s\n", Icon.Err, errColor(s.text), message)
 	}
+}
+
+// ProgressBar represents a visual progress bar
+type ProgressBar struct {
+	text    string
+	total   int64
+	current int64
+	width   int
+	enabled bool
+	color   func(string) string
+	mu      sync.Mutex
+}
+
+// NewProgressBar creates a new progress bar
+func NewProgressBar(text string, total int64, options types.ProgressBarOptions) *ProgressBar {
+	colorFunc := func(s string) string { return primary(s) }
+	if options.Color != nil {
+		colorFunc = options.Color
+	}
+
+	width := 40
+	if options.Width > 0 {
+		width = options.Width
+	}
+
+	return &ProgressBar{
+		text:    text,
+		total:   total,
+		current: 0,
+		width:   width,
+		enabled: options.Enabled,
+		color:   colorFunc,
+	}
+}
+
+// Update updates the progress bar
+func (pb *ProgressBar) Update(current int64) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	pb.current = current
+	if !pb.enabled {
+		return
+	}
+
+	percentage := float64(pb.current) / float64(pb.total) * 100
+	if percentage > 100 {
+		percentage = 100
+	}
+
+	// Calculate filled blocks
+	filled := int(float64(pb.width) * percentage / 100)
+
+	// Build progress bar
+	bar := "["
+	for i := 0; i < pb.width; i++ {
+		if i < filled {
+			bar += "="
+		} else {
+			bar += " "
+		}
+	}
+	bar += "]"
+
+	// Clear line and print progress
+	fmt.Print("\r\033[K")
+	if pb.total > 0 {
+		fmt.Printf("  %s %s %.1f%%", pb.color(bar), pb.text, percentage)
+	} else {
+		fmt.Printf("  %s %s", pb.color(bar), pb.text)
+	}
+}
+
+// UpdateWithText updates the progress bar with custom text
+func (pb *ProgressBar) UpdateWithText(current int64, text string) {
+	pb.mu.Lock()
+	pb.text = text
+	pb.mu.Unlock()
+	pb.Update(current)
+}
+
+// Finish completes the progress bar
+func (pb *ProgressBar) Finish(message string) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	if !pb.enabled {
+		fmt.Printf("%s %s\n", Icon.Ok, success(message))
+		return
+	}
+
+	// Show completed bar
+	bar := "["
+	for i := 0; i < pb.width; i++ {
+		bar += "="
+	}
+	bar += "]"
+
+	fmt.Print("\r\033[K")
+	fmt.Printf("  %s %s\n", pb.color(bar), success(message))
+}
+
+// Fail shows the progress bar as failed
+func (pb *ProgressBar) Fail(reason string) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	if !pb.enabled {
+		fmt.Fprintf(os.Stderr, "%s %s\n", Icon.Err, errColor(reason))
+		return
+	}
+
+	fmt.Print("\r\033[K")
+	fmt.Printf("  %s %s\n", Icon.Err, errColor(reason))
 }
 
 // Update updates the spinner text
