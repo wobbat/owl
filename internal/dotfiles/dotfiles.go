@@ -128,7 +128,54 @@ func ProcessConfigsPerPackage(configEntries []types.ConfigEntry, dryRun bool, gl
 		return nil
 	}
 
+	// First pass: analyze all packages to see if we can show a summary
+	packagesWithChanges := []types.ConfigEntry{}
+	packagesUpToDate := []types.ConfigEntry{}
+	packagesWithConflicts := []types.ConfigEntry{}
+
 	for _, entry := range packagesWithConfigs {
+		configMap := convertConfigsToMap(entry.Configs)
+		actions, err := AnalyzeConfigs(configMap)
+		if err != nil {
+			packagesWithChanges = append(packagesWithChanges, entry)
+			continue
+		}
+
+		hasChanges := false
+		hasConflicts := false
+
+		for _, action := range actions {
+			if action.Status == "conflict" {
+				hasConflicts = true
+			} else if action.Status != "skip" {
+				hasChanges = true
+			}
+		}
+
+		if hasConflicts {
+			packagesWithConflicts = append(packagesWithConflicts, entry)
+		} else if hasChanges {
+			packagesWithChanges = append(packagesWithChanges, entry)
+		} else {
+			packagesUpToDate = append(packagesUpToDate, entry)
+		}
+	}
+
+	// Show summary for up-to-date packages if there are any
+	if len(packagesUpToDate) > 0 {
+		showDotfilesSummary(packagesUpToDate, globalUI)
+	}
+
+	// Process packages that need changes individually
+	for _, entry := range packagesWithChanges {
+		err := processPackageConfigs(entry, globalUI)
+		if err != nil {
+			return fmt.Errorf("failed to process configs for package %s: %w", entry.Package, err)
+		}
+	}
+
+	// Process packages with conflicts individually
+	for _, entry := range packagesWithConflicts {
 		err := processPackageConfigs(entry, globalUI)
 		if err != nil {
 			return fmt.Errorf("failed to process configs for package %s: %w", entry.Package, err)
@@ -136,6 +183,50 @@ func ProcessConfigsPerPackage(configEntries []types.ConfigEntry, dryRun bool, gl
 	}
 
 	return nil
+}
+
+// showDotfilesSummary shows a summary for packages with up-to-date dotfiles
+func showDotfilesSummary(packages []types.ConfigEntry, globalUI *ui.UI) {
+	if len(packages) == 0 {
+		return
+	}
+
+	// Count total packages
+	packageCount := len(packages)
+
+	// Show combined summary
+	if packageCount == 1 {
+		// Single package, show individual entry
+		entry := packages[0]
+		sourcePrefix := globalUI.FormatPackageSource(&entry)
+		fmt.Printf("%s%s %s\n", sourcePrefix,
+			func(s string) string { return "\x1b[36m" + s + "\x1b[0m" }(entry.Package),
+			func(s string) string { return "\x1b[2m" + s + "\x1b[0m" }("->"))
+
+		spinner := ui.NewSpinner("  Dotfiles - checking...", types.SpinnerOptions{Enabled: true})
+		spinner.Stop("")
+		fmt.Println()
+	} else {
+		// Multiple packages, show combined summary
+		packageNames := make([]string, packageCount)
+		for i, entry := range packages {
+			packageNames[i] = entry.Package
+		}
+
+		// Create a summary line with package names
+		summary := fmt.Sprintf("%d packages", packageCount)
+		if packageCount <= 5 {
+			summary = strings.Join(packageNames, ", ")
+		}
+
+		fmt.Printf("%s %s\n",
+			func(s string) string { return "\x1b[36m" + s + "\x1b[0m" }(summary),
+			func(s string) string { return "\x1b[2m" + s + "\x1b[0m" }("->"))
+
+		spinner := ui.NewSpinner("  Dotfiles - checking...", types.SpinnerOptions{Enabled: true})
+		spinner.Stop("")
+		fmt.Println()
+	}
 }
 
 // processPackageConfigs processes configs for a single package

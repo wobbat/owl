@@ -681,3 +681,8 @@ func (u *UI) ShowHelp() {
 func (u *UI) ShowVersion(version string) {
 	fmt.Printf("owl version %s\n", version)
 }
+
+// SystemMessage displays a system message with green brackets and white text
+func (u *UI) SystemMessage(text string) {
+	fmt.Printf("%s %s %s\n", success("::"), white(text), success("::"))
+}

@@ -58,7 +58,7 @@ func HandleDotsCommand(dryRun bool, options *types.CommandOptions) error {
 	if dryRun {
 		globalUI.Success("Dotfiles dry run completed successfully - no changes made")
 	} else {
-		globalUI.Celebration(":: Dotfiles sync complete ::")
+		globalUI.SystemMessage("Dotfiles sync complete")
 	}
 
 	return nil
@@ -153,7 +153,7 @@ func HandleApplyCommand(dryRun bool, options *types.CommandOptions) error {
 	if dryRun {
 		globalUI.Success("Dry run completed successfully - no changes made")
 	} else {
-		globalUI.Celebration(":: System sync complete ::")
+		globalUI.SystemMessage("System sync complete")
 	}
 
 	return nil
