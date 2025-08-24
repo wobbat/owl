@@ -138,13 +138,6 @@ func NewManager(opts Options, r Reporter) Manager {
 	return &manager{opts: opts, reporter: r}
 }
 
-// helper to emit debug messages
-func (m *manager) debug(msg string) {
-	if m.opts.Debug && m.reporter != nil {
-		m.reporter.Info("[debug] " + msg)
-	}
-}
-
 // Stub implementations (to be filled during refactor)
 
 func (m *manager) Apply(ctx context.Context, opt ApplyOptions) (*ApplyResult, error) {

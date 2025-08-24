@@ -3,13 +3,11 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"owl/internal/packages"
 	"owl/internal/types"
 	"owl/internal/ui"
-	"owl/internal/utils"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -280,26 +278,6 @@ func formatRepository(repo string) string {
 	}
 }
 
-func parseSelection(selection string, results []packages.SearchResult) []string {
-	var selected []string
-	parts := strings.Split(selection, ",")
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if num, err := strconv.Atoi(part); err == nil {
-			if num > 0 && num <= len(results) {
-				selected = append(selected, results[num-1].Name)
-			}
-		}
-	}
-
-	return selected
-}
-
-func installPackages(packages []string) error {
-	return installPackagesWithOptions(packages, types.InstallOptions{})
-}
-
 func installPackagesWithOptions(packageNames []string, options types.InstallOptions) error {
 	ui := ui.NewUI()
 
@@ -322,7 +300,7 @@ func installPackagesWithOptions(packageNames []string, options types.InstallOpti
 
 	// Confirm installation
 	if !options.NoConfirm {
-		confirmed, err := utils.ConfirmAction("Proceed with installation?")
+		confirmed, err := ui.ConfirmAction("Proceed with installation?")
 		if err != nil {
 			return err
 		}
@@ -399,7 +377,7 @@ func upgradeSystem(options types.UpgradeOptions) error {
 					ui.Info(fmt.Sprintf("Found %d VCS packages with updates: %s", len(toUpdate), strings.Join(toUpdate, ", ")))
 
 					if !options.NoConfirm {
-						confirmed, err := utils.ConfirmAction(fmt.Sprintf("Update %d VCS packages?", len(toUpdate)))
+						confirmed, err := ui.ConfirmAction(fmt.Sprintf("Update %d VCS packages?", len(toUpdate)))
 						if err != nil {
 							return err
 						}

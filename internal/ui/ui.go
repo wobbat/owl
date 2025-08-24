@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -606,4 +607,77 @@ func (r *LegacyRenderer) DotfilesStatus(status, timing string) {
 // Footer displays the footer
 func (r *LegacyRenderer) Footer() {
 	fmt.Println()
+}
+
+// GetUserConfirmation prompts the user for confirmation and returns their response
+func (u *UI) GetUserConfirmation(prompt string) (string, error) {
+	fmt.Print(prompt)
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(input), nil
+}
+
+// ConfirmAction asks the user to confirm an action with a yes/no prompt
+func (u *UI) ConfirmAction(message string) (bool, error) {
+	response, err := u.GetUserConfirmation(fmt.Sprintf("%s (y/N): ", message))
+	if err != nil {
+		return false, err
+	}
+
+	response = strings.ToLower(response)
+	return response == "y" || response == "yes", nil
+}
+
+// ShowHelp displays the application help information
+func (u *UI) ShowHelp() {
+	fmt.Println("Owl Package Manager")
+	fmt.Println("A modern AUR helper and package manager for Arch Linux with config management and setup script automation.")
+
+	fmt.Printf("\n%s\n", color.New(color.Bold).Sprint("Usage:"))
+	fmt.Println("  owl <command> [options]")
+
+	fmt.Printf("\n%s\n", color.New(color.Bold).Sprint("Config Management Commands:"))
+	u.List([]string{
+		"apply          Install packages, copy configs, and run setup scripts",
+		"dry-run, dr    Preview what would be done without making changes",
+		"dots           Check and sync only dotfiles configurations",
+		"uninstall      Remove all managed packages and configs",
+	}, types.ListOptions{
+		Indent: true,
+		Color:  func(s string) string { return color.New(color.FgBlue).Sprint(s) },
+	})
+
+	fmt.Printf("\n%s\n", color.New(color.Bold).Sprint("Package Manager Commands:"))
+	u.List([]string{
+		"search, s      Search for packages in repositories and AUR",
+		"install, i, S  Install packages from repositories or AUR",
+		"upgrade, u     Upgrade all packages to latest versions",
+		"info, Si       Show detailed information about a package",
+		"query, q, Q    Query installed packages",
+	}, types.ListOptions{
+		Indent: true,
+		Color:  func(s string) string { return color.New(color.FgMagenta).Sprint(s) },
+	})
+
+	fmt.Printf("\n%s\n", color.New(color.Bold).Sprint("General Commands:"))
+	u.List([]string{
+		"gendb          Generate VCS database for development packages",
+		"help, --help   Show this help message",
+		"version, -v    Show version information",
+	}, types.ListOptions{
+		Indent: true,
+		Color:  func(s string) string { return color.New(color.FgWhite).Sprint(s) },
+	})
+
+	fmt.Println()
+}
+
+// ShowVersion displays the application version
+func (u *UI) ShowVersion(version string) {
+	fmt.Printf("owl version %s\n", version)
 }

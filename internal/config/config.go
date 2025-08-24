@@ -181,7 +181,7 @@ func parseOwlConfigFile(filePath string, options ParseOptions) (*ConfigResult, e
 				continue
 			}
 
-			if match := regexp.MustCompile(`^(\S+)\s*=\s*(.+)$`).FindStringSubmatch(envArgs); match != nil && len(match) == 3 {
+			if match := regexp.MustCompile(`^(\S+)\s*=\s*(.+)$`).FindStringSubmatch(envArgs); len(match) == 3 {
 				globalEnvs = append(globalEnvs, types.EnvVar{
 					Key:   match[1],
 					Value: match[2],
@@ -250,7 +250,7 @@ func parseOwlConfigFile(filePath string, options ParseOptions) (*ConfigResult, e
 				continue
 			}
 
-			if match := regexp.MustCompile(`^(\S+)\s*->\s*(\S+)$`).FindStringSubmatch(configArgs); match != nil && len(match) == 3 {
+			if match := regexp.MustCompile(`^(\S+)\s*->\s*(\S+)$`).FindStringSubmatch(configArgs); len(match) == 3 {
 				source := match[1]
 				destination := match[2]
 
@@ -295,7 +295,7 @@ func parseOwlConfigFile(filePath string, options ParseOptions) (*ConfigResult, e
 				continue
 			}
 
-			if match := regexp.MustCompile(`^(\S+)\s*=\s*(.+)$`).FindStringSubmatch(envArgs); match != nil && len(match) == 3 {
+			if match := regexp.MustCompile(`^(\S+)\s*=\s*(.+)$`).FindStringSubmatch(envArgs); len(match) == 3 {
 				envs = append(envs, types.EnvVar{
 					Key:   match[1],
 					Value: match[2],

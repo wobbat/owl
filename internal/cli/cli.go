@@ -180,88 +180,12 @@ func Execute() error {
 
 // showHelp displays custom help information that matches the TypeScript version
 func showHelp() {
-	fmt.Println("Owl Package Manager")
-	fmt.Println("A modern AUR helper and package manager for Arch Linux with config management and setup script automation.")
-
-	fmt.Println("\x1b[1mUsage:\x1b[0m")
-	fmt.Println("  owl <command> [options]")
-
-	fmt.Println("\x1b[1mConfig Management Commands:\x1b[0m")
-	globalUI.List([]string{
-		"apply          Install packages, copy configs, and run setup scripts",
-		"dry-run, dr    Preview what would be done without making changes",
-		"dots           Check and sync only dotfiles configurations",
-		"uninstall      Remove all managed packages and configs",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[34m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println("\x1b[1m\nPackage Manager Commands:\x1b[0m")
-	globalUI.List([]string{
-		"search, s      Search for packages in repositories and AUR",
-		"install, i, S  Install packages from repositories or AUR",
-		"upgrade, u     Upgrade all packages to latest versions",
-		"info, Si       Show detailed information about a package",
-		"query, q, Q    Query installed packages",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[35m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println("\x1b[1m\nGeneral Commands:\x1b[0m")
-	globalUI.List([]string{
-		"gendb          Generate VCS database for development packages",
-		"help, --help   Show this help message",
-		"version, -v    Show version information",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[37m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println("\x1b[1m\nOptions:\x1b[0m")
-	globalUI.List([]string{
-		"--no-spinner   Disable loading animations",
-		"--verbose      Show full command output instead of progress spinners",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[37m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println("\x1b[1m\nExamples:\x1b[0m")
-	globalUI.List([]string{
-		"owl                      # Apply all configurations (default)",
-		"owl search firefox       # Search for firefox packages",
-		"owl install yay          # Install yay from AUR",
-		"owl upgrade --devel      # Upgrade including development packages",
-		"owl info discord         # Show information about discord package",
-		"owl query --foreign      # List AUR packages",
-		"owl dots                 # Sync only dotfiles configurations",
-		"owl dots --dry-run       # Preview dotfiles changes",
-		"owl gendb                # Generate VCS database for development packages",
-		"owl dry-run              # Preview config changes",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[32m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println("\x1b[1m\nConfiguration:\x1b[0m")
-	fmt.Println("  Place configuration files in ~/.owl/")
-	globalUI.List([]string{
-		"~/.owl/main.owl           # Global configuration",
-		"~/.owl/hosts/{host}.owl   # Host-specific overrides",
-	}, types.ListOptions{
-		Indent: true,
-		Color:  func(s string) string { return "\x1b[2m" + s + "\x1b[0m" },
-	})
-
-	fmt.Println()
+	globalUI.ShowHelp()
 }
 
 // showVersion displays version information
 func showVersion() {
-	fmt.Println("Owl v1.0.0")
-	fmt.Println("\x1b[2mA modern AUR helper and package manager for Arch Linux\x1b[0m")
+	globalUI.ShowVersion("1.0.0")
 }
 
 // setupEnvironment performs common setup tasks for all commands

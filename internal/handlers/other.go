@@ -8,7 +8,6 @@ import (
 	"owl/internal/packages"
 	"owl/internal/types"
 	"owl/internal/ui"
-	"owl/internal/utils"
 )
 
 // HandleUpgradeCommand handles the upgrade command
@@ -130,7 +129,7 @@ func HandleUninstallCommand(options *types.CommandOptions) error {
 	fmt.Printf("This will remove %d packages managed by Owl.\n", len(packageNames))
 
 	// Get user confirmation
-	confirmed, err := utils.ConfirmAction("Continue?")
+	confirmed, err := globalUI.ConfirmAction("Continue?")
 	if err != nil {
 		return fmt.Errorf("failed to get user confirmation: %w", err)
 	}

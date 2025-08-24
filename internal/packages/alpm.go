@@ -653,7 +653,7 @@ func (m *ALPMManager) InstallOfficialPackageWithProgress(packageName, repository
 	}
 
 	if progressCallback != nil {
-		progressCallback(fmt.Sprintf("Package installation requires elevated privileges"))
+		progressCallback("Package installation requires elevated privileges")
 	}
 
 	// Note: libalpm v2 doesn't provide direct package installation APIs for individual packages
@@ -683,66 +683,6 @@ func (m *ALPMManager) InstallPackageWithProgress(packageName string, verbose boo
 			}
 		}
 	})
-}
-
-// monitorPacmanOutput monitors pacman output and reports progress
-func (m *ALPMManager) monitorPacmanOutput(stdout, stderr io.ReadCloser, packageName, repository string, progressCallback ProgressCallback) {
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if progressCallback != nil {
-			if strings.Contains(line, "downloading") {
-				progressCallback(fmt.Sprintf("Downloading %s from %s", packageName, repository))
-			} else if strings.Contains(line, "checking keys") {
-				progressCallback(fmt.Sprintf("Verifying %s signatures", packageName))
-			} else if strings.Contains(line, "installing") {
-				progressCallback(fmt.Sprintf("Installing %s", packageName))
-			} else if strings.Contains(line, "transaction completed") {
-				progressCallback(fmt.Sprintf("Completed %s installation", packageName))
-			}
-		}
-	}
-
-	// Also monitor stderr for errors
-	errScanner := bufio.NewScanner(stderr)
-	for errScanner.Scan() {
-		line := errScanner.Text()
-		if progressCallback != nil && strings.Contains(line, "error") {
-			progressCallback(fmt.Sprintf("Error with %s: %s", packageName, line))
-		}
-	}
-}
-
-// monitorMakepkgOutput monitors makepkg output and reports progress
-func (m *ALPMManager) monitorMakepkgOutput(stdout, stderr io.ReadCloser, packageName string, progressCallback ProgressCallback) {
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if progressCallback != nil {
-			if strings.Contains(line, "Retrieving sources") {
-				progressCallback(fmt.Sprintf("Downloading %s sources", packageName))
-			} else if strings.Contains(line, "Validating source files") {
-				progressCallback(fmt.Sprintf("Validating %s sources", packageName))
-			} else if strings.Contains(line, "Extracting sources") {
-				progressCallback(fmt.Sprintf("Extracting %s sources", packageName))
-			} else if strings.Contains(line, "Starting build") {
-				progressCallback(fmt.Sprintf("Compiling %s", packageName))
-			} else if strings.Contains(line, "Installing package") {
-				progressCallback(fmt.Sprintf("Installing compiled %s", packageName))
-			} else if strings.Contains(line, "Finished making") {
-				progressCallback(fmt.Sprintf("Finished building %s", packageName))
-			}
-		}
-	}
-
-	// Monitor stderr for errors
-	errScanner := bufio.NewScanner(stderr)
-	for errScanner.Scan() {
-		line := errScanner.Text()
-		if progressCallback != nil && strings.Contains(line, "error") {
-			progressCallback(fmt.Sprintf("Build error for %s: %s", packageName, line))
-		}
-	}
 }
 
 // Legacy method for backward compatibility
@@ -1311,24 +1251,6 @@ func (m *ALPMManager) GetAURPackages() ([]string, error) {
 	}
 
 	return aurPackages, nil
-}
-
-// shouldUpdate determines if a package needs updating, with special handling for VCS packages
-func (m *ALPMManager) shouldUpdate(packageName, installedVer, aurVer string, vcsStore *VCSStore) bool {
-	// For git packages, ALWAYS use VCS-aware comparison (even without explicit devel checking)
-	if IsGitPackage(packageName) {
-		// Check if we have VCS info for this package
-		needsUpdate, err := vcsStore.CheckGitUpdate(context.Background(), packageName)
-		if err != nil {
-			// If VCS check fails, be conservative - assume no update needed
-			// This prevents unnecessary rebuilds when network is unavailable
-			return false
-		}
-		return needsUpdate
-	}
-
-	// For regular packages, use libalpm's proper version comparison
-	return alpm.VerCmp(installedVer, aurVer) < 0
 }
 
 // shouldUpdateWithDevel determines if a package needs updating with optional explicit VCS checking
