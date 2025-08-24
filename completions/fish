@@ -1,0 +1,25 @@
+# owl fish completion
+complete -c owl -f
+
+# Commands
+complete -c owl -n "__fish_use_subcommand" -a "apply" -d "Install packages, copy configs, and run setup scripts"
+complete -c owl -n "__fish_use_subcommand" -a "dry-run dr" -d "Preview what would be done without making changes"
+complete -c owl -n "__fish_use_subcommand" -a "dots" -d "Check and sync only dotfiles configurations"
+complete -c owl -n "__fish_use_subcommand" -a "search s" -d "Search for packages in repositories and AUR"
+complete -c owl -n "__fish_use_subcommand" -a "install i S" -d "Install packages from repositories or AUR"
+complete -c owl -n "__fish_use_subcommand" -a "upgrade u" -d "Upgrade all packages to latest versions"
+complete -c owl -n "__fish_use_subcommand" -a "info Si" -d "Show detailed information about a package"
+complete -c owl -n "__fish_use_subcommand" -a "query q Q" -d "Query installed packages"
+complete -c owl -n "__fish_use_subcommand" -a "uninstall" -d "Remove all managed packages and configs"
+complete -c owl -n "__fish_use_subcommand" -a "gendb" -d "Generate VCS database for development packages"
+complete -c owl -n "__fish_use_subcommand" -a "help" -d "Show help message"
+complete -c owl -n "__fish_use_subcommand" -a "version" -d "Show version information"
+
+# Global options
+complete -c owl -l help -d "Show help message"
+complete -c owl -l version -s v -d "Show version information"
+complete -c owl -l verbose -d "Show full command output instead of progress spinners"
+complete -c owl -l no-spinner -d "Disable loading animations"
+complete -c owl -l dry-run -d "Preview changes without making them"
+complete -c owl -l devel -d "Include development packages in upgrade"
+complete -c owl -l foreign -d "List foreign (AUR) packages"

@@ -5,13 +5,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Jguer/go-alpm/v2"
 	"owl/internal/types"
 )
 
 // DependencyResolver handles dependency resolution for packages
 type DependencyResolver struct {
-	alpm     *ALPMManager
-	searcher *PackageSearcher
+	alpm        *ALPMManager
+	enhanced    *EnhancedALPMManager
+	searcher    *PackageSearcher
+	transaction *TransactionManager
 }
 
 // NewDependencyResolver creates a new dependency resolver
@@ -21,15 +24,26 @@ func NewDependencyResolver() (*DependencyResolver, error) {
 		return nil, fmt.Errorf("failed to initialize ALPM: %w", err)
 	}
 
+	enhanced, err := NewEnhancedALPMManager()
+	if err != nil {
+		alpm.Release()
+		return nil, fmt.Errorf("failed to initialize enhanced ALPM: %w", err)
+	}
+
 	searcher, err := NewPackageSearcher()
 	if err != nil {
 		alpm.Release()
+		enhanced.Cleanup()
 		return nil, fmt.Errorf("failed to initialize searcher: %w", err)
 	}
 
+	transaction := NewTransactionManager(enhanced.handle)
+
 	return &DependencyResolver{
-		alpm:     alpm,
-		searcher: searcher,
+		alpm:        alpm,
+		enhanced:    enhanced,
+		searcher:    searcher,
+		transaction: transaction,
 	}, nil
 }
 
@@ -37,6 +51,9 @@ func NewDependencyResolver() (*DependencyResolver, error) {
 func (dr *DependencyResolver) Release() {
 	if dr.alpm != nil {
 		dr.alpm.Release()
+	}
+	if dr.enhanced != nil {
+		dr.enhanced.Cleanup()
 	}
 	if dr.searcher != nil {
 		dr.searcher.Release()
@@ -92,7 +109,7 @@ func (dr *DependencyResolver) ResolvePackages(packageNames []string, options typ
 	// Separate dependencies and make dependencies
 	dr.categorizeDependencies(visited, plan)
 
-	// Check for conflicts
+	// Check for conflicts using enhanced ALPM
 	dr.checkConflicts(plan)
 
 	// Determine installation order
@@ -108,11 +125,9 @@ func (dr *DependencyResolver) resolvePackageTree(pkgName string, visited map[str
 		return node, nil
 	}
 
-	// Check if package is already installed
-	installed, err := dr.alpm.IsPackageInstalled(pkgName)
-	if err != nil {
-		return nil, err
-	}
+	// Check if package is already installed using enhanced ALPM
+	localPkg := dr.enhanced.LocalPackage(pkgName)
+	installed := localPkg != nil
 
 	// Get package information
 	pkgInfo, err := dr.searcher.GetPackageInfo(pkgName)
@@ -140,8 +155,8 @@ func (dr *DependencyResolver) resolvePackageTree(pkgName string, visited map[str
 		return node, nil
 	}
 
-	// Resolve dependencies (this would need to be implemented based on PKGBUILD parsing)
-	dependencies, err := dr.getPackageDependencies(pkgName)
+	// Resolve dependencies using enhanced ALPM for better dependency handling
+	dependencies, err := dr.getPackageDependenciesEnhanced(pkgName)
 	if err != nil {
 		return nil, err
 	}
@@ -169,15 +184,105 @@ type PackageDependency struct {
 	MakeDep  bool
 }
 
-// getPackageDependencies gets the dependencies for a package
+// getPackageDependenciesEnhanced gets dependencies using the enhanced ALPM manager
+func (dr *DependencyResolver) getPackageDependenciesEnhanced(pkgName string) ([]PackageDependency, error) {
+	var dependencies []PackageDependency
+
+	// Try to find package in sync databases using enhanced ALPM
+	pkg := dr.enhanced.SyncPackage(pkgName)
+	if pkg != nil {
+		// Get dependencies using enhanced ALPM
+		deps := dr.enhanced.PackageDepends(pkg)
+		for _, dep := range deps {
+			dependencies = append(dependencies, PackageDependency{
+				Name:     dep.Name,
+				Version:  dep.Version,
+				Optional: false,
+				MakeDep:  false,
+			})
+		}
+
+		// Get optional dependencies
+		optDeps := dr.enhanced.PackageOptionalDepends(pkg)
+		for _, dep := range optDeps {
+			dependencies = append(dependencies, PackageDependency{
+				Name:     dep.Name,
+				Version:  dep.Version,
+				Optional: true,
+				MakeDep:  false,
+			})
+		}
+
+		return dependencies, nil
+	}
+
+	// Fallback to original ALPM implementation for AUR packages
+	return dr.getPackageDependencies(pkgName)
+}
+
+// getPackageDependencies gets the dependencies for a package using libalpm (legacy)
 func (dr *DependencyResolver) getPackageDependencies(pkgName string) ([]PackageDependency, error) {
-	// This is a simplified implementation
-	// In practice, you'd need to parse PKGBUILD files or use ALPM to get dependency information
+	var dependencies []PackageDependency
 
-	// For AUR packages, you'd download and parse the PKGBUILD
-	// For official packages, you can use ALPM
+	// First check official repositories using libalpm
+	syncDBs, err := dr.alpm.handle.SyncDBs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync databases: %w", err)
+	}
 
-	return []PackageDependency{}, nil
+	// Look for package in sync databases
+	for _, db := range syncDBs.Slice() {
+		if pkg := db.Pkg(pkgName); pkg != nil {
+			// Get dependencies using libalpm
+			deps := pkg.Depends()
+			if deps != nil {
+				deps.ForEach(func(dep *alpm.Depend) error {
+					dependencies = append(dependencies, PackageDependency{
+						Name:     dep.Name,
+						Version:  dep.Version,
+						Optional: false,
+						MakeDep:  false,
+					})
+					return nil
+				})
+			}
+
+			// Get optional dependencies
+			optDeps := pkg.OptionalDepends()
+			if optDeps != nil {
+				optDeps.ForEach(func(dep *alpm.Depend) error {
+					dependencies = append(dependencies, PackageDependency{
+						Name:     dep.Name,
+						Version:  dep.Version,
+						Optional: true,
+						MakeDep:  false,
+					})
+					return nil
+				})
+			}
+
+			// Get make dependencies (for completeness, though less common in binary packages)
+			makeDeps := pkg.MakeDepends()
+			if makeDeps != nil {
+				makeDeps.ForEach(func(dep *alpm.Depend) error {
+					dependencies = append(dependencies, PackageDependency{
+						Name:     dep.Name,
+						Version:  dep.Version,
+						Optional: false,
+						MakeDep:  true,
+					})
+					return nil
+				})
+			}
+
+			return dependencies, nil
+		}
+	}
+
+	// If not found in official repos, it might be an AUR package
+	// For AUR packages, we'd need to download and parse PKGBUILD
+	// This is more complex and would require additional implementation
+	return dependencies, nil
 }
 
 // categorizeDependencies separates targets, dependencies, and make dependencies
@@ -191,22 +296,44 @@ func (dr *DependencyResolver) categorizeDependencies(visited map[string]*Depende
 	}
 }
 
-// checkConflicts checks for package conflicts
+// checkConflicts checks for package conflicts using enhanced ALPM
 func (dr *DependencyResolver) checkConflicts(plan *ResolutionPlan) {
-	// This would check for package conflicts and provides relationships
-	// Implementation would involve checking installed packages and planned installations
+	// Use enhanced ALPM for better conflict detection
+	var allPackages []alpm.IPackage
+
+	// Collect all packages from the plan
+	for _, node := range plan.Targets {
+		if pkg := dr.enhanced.SyncPackage(node.Name); pkg != nil {
+			allPackages = append(allPackages, pkg)
+		}
+	}
+	for _, node := range plan.Dependencies {
+		if pkg := dr.enhanced.SyncPackage(node.Name); pkg != nil {
+			allPackages = append(allPackages, pkg)
+		}
+	}
+
+	// Use the enhanced ALPM transaction manager to check for conflicts
+	if upgrades, err := dr.transaction.CheckUpgrades(false); err == nil {
+		for pkgName := range upgrades {
+			// Check if any planned packages conflict with upgrade targets
+			for _, node := range plan.Targets {
+				if node.Name == pkgName {
+					plan.Conflicts = append(plan.Conflicts, fmt.Sprintf("%s conflicts with system upgrade", pkgName))
+				}
+			}
+		}
+	}
 }
 
 // calculateInstallOrder determines the correct order to install packages
 func (dr *DependencyResolver) calculateInstallOrder(plan *ResolutionPlan) {
 	installed := make(map[string]bool)
 
-	// Get currently installed packages
-	installedPackages, err := dr.alpm.GetInstalledPackages()
-	if err == nil {
-		for _, pkg := range installedPackages {
-			installed[pkg] = true
-		}
+	// Get currently installed packages using enhanced ALPM
+	installedPackages := dr.enhanced.LocalPackages()
+	for _, pkg := range installedPackages {
+		installed[pkg.Name()] = true
 	}
 
 	var order []string
@@ -273,4 +400,37 @@ func (dr *DependencyResolver) PrintResolutionPlan(plan *ResolutionPlan) {
 		fmt.Printf("Remove (%d) ", len(plan.ToRemove))
 		fmt.Println(strings.Join(plan.ToRemove, " "))
 	}
+}
+
+// ExecuteInstallPlan executes an installation plan using the transaction manager
+func (dr *DependencyResolver) ExecuteInstallPlan(plan *ResolutionPlan, options TransactionOptions) error {
+	if len(plan.InstallOrder) == 0 {
+		return nil // Nothing to install
+	}
+
+	// Install packages in the correct order
+	return dr.transaction.InstallPackages(plan.InstallOrder, options)
+}
+
+// ValidatePackagesExist validates that all packages in the plan exist
+func (dr *DependencyResolver) ValidatePackagesExist(plan *ResolutionPlan) error {
+	var missing []string
+
+	for _, node := range plan.Targets {
+		if pkg := dr.enhanced.SyncPackage(node.Name); pkg == nil {
+			missing = append(missing, node.Name)
+		}
+	}
+
+	for _, node := range plan.Dependencies {
+		if pkg := dr.enhanced.SyncPackage(node.Name); pkg == nil {
+			missing = append(missing, node.Name)
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("packages not found: %s", strings.Join(missing, ", "))
+	}
+
+	return nil
 }

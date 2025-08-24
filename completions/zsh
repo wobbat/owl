@@ -1,0 +1,54 @@
+#compdef owl
+
+_owl_commands() {
+    local -a commands
+    commands=(
+        'apply:Install packages, copy configs, and run setup scripts'
+        'dry-run:Preview what would be done without making changes'
+        'dr:Preview what would be done without making changes'
+        'dots:Check and sync only dotfiles configurations'
+        'search:Search for packages in repositories and AUR'
+        's:Search for packages in repositories and AUR'
+        'install:Install packages from repositories or AUR'
+        'i:Install packages from repositories or AUR'
+        'S:Install packages from repositories or AUR'
+        'upgrade:Upgrade all packages to latest versions'
+        'u:Upgrade all packages to latest versions'
+        'info:Show detailed information about a package'
+        'Si:Show detailed information about a package'
+        'query:Query installed packages'
+        'q:Query installed packages'
+        'Q:Query installed packages'
+        'uninstall:Remove all managed packages and configs'
+        'gendb:Generate VCS database for development packages'
+        'help:Show help message'
+        'version:Show version information'
+    )
+    _describe 'commands' commands
+}
+
+_owl_options() {
+    local -a options
+    options=(
+        '--help[Show help message]'
+        '--version[Show version information]'
+        '-v[Show version information]'
+        '--verbose[Show full command output instead of progress spinners]'
+        '--no-spinner[Disable loading animations]'
+        '--dry-run[Preview changes without making them]'
+        '--devel[Include development packages in upgrade]'
+        '--foreign[List foreign (AUR) packages]'
+    )
+    _describe 'options' options
+}
+
+_owl() {
+    local context state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :_owl_commands' \
+        '*: :_owl_options'
+}
+
+_owl "$@"

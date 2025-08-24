@@ -27,6 +27,15 @@ var (
 	white     = color.New(color.FgWhite).SprintFunc()
 )
 
+// Exported color functions for legacy compatibility
+func Muted(text string) string {
+	return muted(text)
+}
+
+func Success(text string) string {
+	return success(text)
+}
+
 // Icons
 var Icon = struct {
 	Ok      string
@@ -243,6 +252,7 @@ type Spinner struct {
 	startTime time.Time
 	mu        sync.Mutex
 	done      chan bool
+	finalizer func(duration time.Duration)
 }
 
 // NewSpinner creates a new spinner instance
@@ -303,6 +313,13 @@ func (s *Spinner) animate() {
 	}
 }
 
+// SetFinalizer sets a custom finalizer function for the spinner
+func (s *Spinner) SetFinalizer(finalizer func(duration time.Duration)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finalizer = finalizer
+}
+
 // Stop stops the spinner with a success message
 func (s *Spinner) Stop(suffix string) {
 	s.mu.Lock()
@@ -318,6 +335,13 @@ func (s *Spinner) Stop(suffix string) {
 	}
 
 	duration := time.Since(s.startTime)
+
+	// Use custom finalizer if set
+	if s.finalizer != nil {
+		s.finalizer(duration)
+		return
+	}
+
 	timing := muted(fmt.Sprintf("(%dms)", duration.Milliseconds()))
 	message := ""
 	if suffix != "" {
@@ -505,4 +529,81 @@ func (s *Spinner) Update(newText string) {
 	if newText != "" {
 		s.text = newText
 	}
+}
+
+// LegacyRenderer provides legacy TypeScript-style UI rendering
+type LegacyRenderer struct {
+	ui      *UI
+	noColor bool
+}
+
+// NewLegacyRenderer creates a new legacy renderer instance
+func NewLegacyRenderer() *LegacyRenderer {
+	return &LegacyRenderer{
+		ui:      NewUI(),
+		noColor: false,
+	}
+}
+
+// NoColor indicates if color output is disabled
+func (r *LegacyRenderer) NoColor() bool {
+	return r.noColor
+}
+
+// SetNoColor sets the no-color mode
+func (r *LegacyRenderer) SetNoColor(noColor bool) {
+	r.noColor = noColor
+}
+
+// Title displays the application title
+func (r *LegacyRenderer) Title() {
+	r.ui.Header("")
+}
+
+// StartSpinner starts a spinner with the given text
+func (r *LegacyRenderer) StartSpinner(text string) *Spinner {
+	return NewSpinner(text, types.SpinnerOptions{Enabled: true})
+}
+
+// StopSpinner stops the spinner with a message
+func (r *LegacyRenderer) StopSpinner(spinner *Spinner, message string) {
+	spinner.Stop(message)
+}
+
+// HostInfo displays host information
+func (r *LegacyRenderer) HostInfo(hostname string, packageCount int) {
+	fmt.Printf("%s     %s\n", muted("host:"), hostname)
+	fmt.Printf("%s %d\n", muted("packages:"), packageCount)
+	fmt.Println()
+}
+
+// Separator displays a separator line
+func (r *LegacyRenderer) Separator() {
+	fmt.Println(warning(":::::::::::::::"))
+	fmt.Println()
+}
+
+// MaintenanceHeader displays the maintenance section header
+func (r *LegacyRenderer) MaintenanceHeader() {
+	fmt.Println(primary("Maintenance:"))
+}
+
+// ConfigHeader displays the configuration section header
+func (r *LegacyRenderer) ConfigHeader() {
+	fmt.Println(primary("Configuration:"))
+}
+
+// PackageHeader displays a package header
+func (r *LegacyRenderer) PackageHeader(packageName string) {
+	fmt.Printf("%s %s\n", primary(packageName), muted("->"))
+}
+
+// DotfilesStatus displays dotfiles status
+func (r *LegacyRenderer) DotfilesStatus(status, timing string) {
+	fmt.Printf("  Dotfiles - %s %s\n", success(status), muted(timing))
+}
+
+// Footer displays the footer
+func (r *LegacyRenderer) Footer() {
+	fmt.Println()
 }

@@ -16,6 +16,17 @@ type ServiceStatus struct {
 	Active  bool
 }
 
+// ServiceAction represents what action was taken on a service
+type ServiceAction struct {
+	Name       string
+	WasEnabled bool
+	WasActive  bool
+	Enabled    bool
+	Started    bool
+	NoAction   bool
+	Error      error
+}
+
 // checkServiceStatus checks if a systemd service is enabled and active
 func checkServiceStatus(serviceName string) (ServiceStatus, error) {
 	status := ServiceStatus{
@@ -53,26 +64,44 @@ func startService(serviceName string) error {
 	return cmd.Run()
 }
 
-// enableAndStartService enables and starts a systemd service
-func enableAndStartService(serviceName string) error {
+// enableAndStartService enables and starts a systemd service if needed
+func enableAndStartService(serviceName string) ServiceAction {
+	action := ServiceAction{
+		Name: serviceName,
+	}
+
 	status, err := checkServiceStatus(serviceName)
 	if err != nil {
-		return fmt.Errorf("failed to check service status: %w", err)
+		action.Error = fmt.Errorf("failed to check service status: %w", err)
+		return action
+	}
+
+	action.WasEnabled = status.Enabled
+	action.WasActive = status.Active
+
+	// If service is already enabled and active, no action needed
+	if status.Enabled && status.Active {
+		action.NoAction = true
+		return action
 	}
 
 	if !status.Enabled {
 		if err := enableService(serviceName); err != nil {
-			return fmt.Errorf("failed to enable service %s: %w", serviceName, err)
+			action.Error = fmt.Errorf("failed to enable service %s: %w", serviceName, err)
+			return action
 		}
+		action.Enabled = true
 	}
 
 	if !status.Active {
 		if err := startService(serviceName); err != nil {
-			return fmt.Errorf("failed to start service %s: %w", serviceName, err)
+			action.Error = fmt.Errorf("failed to start service %s: %w", serviceName, err)
+			return action
 		}
+		action.Started = true
 	}
 
-	return nil
+	return action
 }
 
 // ProcessServices manages services
@@ -90,22 +119,45 @@ func ProcessServices(services []string, dryRun bool, globalUI *ui.UI) error {
 		return nil
 	}
 
+	// Check all services and collect their actions
+	var actions []ServiceAction
+	var servicesNeedingAction []ServiceAction
+
+	for _, serviceName := range services {
+		action := enableAndStartService(serviceName)
+		actions = append(actions, action)
+		if action.Error != nil || !action.NoAction {
+			servicesNeedingAction = append(servicesNeedingAction, action)
+		}
+	}
+
+	// If no services need action, don't show anything
+	if len(servicesNeedingAction) == 0 {
+		return nil
+	}
+
 	fmt.Println("Service management:")
 
-	spinner := ui.NewSpinner(fmt.Sprintf("Managing %d services", len(services)), types.SpinnerOptions{Enabled: true})
+	spinner := ui.NewSpinner(fmt.Sprintf("Managing %d services", len(servicesNeedingAction)), types.SpinnerOptions{Enabled: true})
 
 	successCount := 0
 	errorCount := 0
 
-	for _, serviceName := range services {
-		spinner.Update(fmt.Sprintf("Managing service %s...", serviceName))
-
-		err := enableAndStartService(serviceName)
-		if err != nil {
+	for _, action := range servicesNeedingAction {
+		if action.Error != nil {
 			errorCount++
-			globalUI.Err(fmt.Sprintf("Failed to manage service %s: %v", serviceName, err))
+			globalUI.Err(fmt.Sprintf("Failed to manage service %s: %v", action.Name, action.Error))
 		} else {
 			successCount++
+			actionMsg := ""
+			if action.Enabled && action.Started {
+				actionMsg = "enabled and started"
+			} else if action.Enabled {
+				actionMsg = "enabled"
+			} else if action.Started {
+				actionMsg = "started"
+			}
+			spinner.Update(fmt.Sprintf("Service %s %s", action.Name, actionMsg))
 		}
 	}
 

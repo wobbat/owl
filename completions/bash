@@ -1,0 +1,25 @@
+# owl bash completion
+_owl() {
+    local cur prev words cword
+    _init_completion || return
+
+    case $prev in
+        search|s|install|i|S|info|Si)
+            # Complete package names (simplified)
+            return 0
+            ;;
+        *)
+            ;;
+    esac
+
+    case $cur in
+        -*)
+            COMPREPLY=($(compgen -W "--help --version --verbose --no-spinner --dry-run --devel --foreign" -- "$cur"))
+            ;;
+        *)
+            COMPREPLY=($(compgen -W "apply dry-run dr dots search s install i S upgrade u info Si query q Q uninstall gendb help version" -- "$cur"))
+            ;;
+    esac
+}
+
+complete -F _owl owl

@@ -1,0 +1,117 @@
+.TH OWL 8 "August 2024" "owl 0.1.0" "System Administration Commands"
+.SH NAME
+owl \- modern AUR helper and package manager for Arch Linux
+.SH SYNOPSIS
+.B owl
+[\fIOPTIONS\fR] [\fICOMMAND\fR] [\fIARGUMENTS\fR]
+.SH DESCRIPTION
+.B owl
+is a modern AUR helper and package manager for Arch Linux that provides config management and setup script automation. It can install packages from both official repositories and the AUR, manage dotfiles, run setup scripts, and handle system services.
+.SH COMMANDS
+.TP
+.B apply
+Install packages, copy configs, and run setup scripts (default command)
+.TP
+.B dry-run, dr
+Preview what would be done without making changes
+.TP
+.B dots
+Check and sync only dotfiles configurations
+.TP
+.B search, s
+Search for packages in repositories and AUR
+.TP
+.B install, i, S
+Install packages from repositories or AUR
+.TP
+.B upgrade, u
+Upgrade all packages to latest versions
+.TP
+.B info, Si
+Show detailed information about a package
+.TP
+.B query, q, Q
+Query installed packages
+.TP
+.B uninstall
+Remove all managed packages and configs
+.TP
+.B gendb
+Generate VCS database for development packages
+.TP
+.B help, --help
+Show help message
+.TP
+.B version, -v
+Show version information
+.SH OPTIONS
+.TP
+.B --verbose
+Show full command output instead of progress spinners
+.TP
+.B --no-spinner
+Disable loading animations
+.TP
+.B --dry-run
+Preview changes without making them
+.TP
+.B --devel
+Include development packages in upgrade
+.TP
+.B --foreign
+List foreign (AUR) packages
+.SH CONFIGURATION
+Configuration files should be placed in
+.IR ~/.owl/ .
+.TP
+.I ~/.owl/main.owl
+Global configuration file
+.TP
+.I ~/.owl/hosts/{hostname}.owl
+Host-specific configuration overrides
+.SH EXAMPLES
+.TP
+.B owl
+Apply all configurations (default)
+.TP
+.B owl search firefox
+Search for firefox packages
+.TP
+.B owl install yay
+Install yay from AUR
+.TP
+.B owl upgrade --devel
+Upgrade including development packages
+.TP
+.B owl info discord
+Show information about discord package
+.TP
+.B owl query --foreign
+List AUR packages
+.TP
+.B owl dots
+Sync only dotfiles configurations
+.TP
+.B owl dots --dry-run
+Preview dotfiles changes
+.TP
+.B owl gendb
+Generate VCS database for development packages
+.TP
+.B owl dry-run
+Preview config changes
+.SH FILES
+.TP
+.I ~/.owl/
+Configuration directory
+.TP
+.I ~/.owl/.state/
+State and cache directory
+.SH SEE ALSO
+.BR pacman (8),
+.BR makepkg (8),
+.BR yay (8)
+.SH AUTHOR
+Written for the Arch Linux community.
+.SH BUGS
+Report bugs at: https://github.com/wobbat/owl/issues
