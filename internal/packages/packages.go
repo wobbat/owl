@@ -34,7 +34,7 @@ func EnsurePackageManagerReady() error {
 }
 
 // AnalyzePackages analyzes what packages need to be installed or removed
-func AnalyzePackages(configuredPackages []string) ([]types.PackageAction, error) {
+func AnalyzePackages(configuredPackages []string, verbose bool) ([]types.PackageAction, error) {
 	managedPackages, err := loadManagedPackages()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load managed packages: %w", err)
@@ -50,10 +50,25 @@ func AnalyzePackages(configuredPackages []string) ([]types.PackageAction, error)
 	// Check which configured packages need to be installed
 	for _, pkg := range configuredPackages {
 		if !contains(installedPackages, pkg) {
-			actions = append(actions, types.PackageAction{
-				Name:   pkg,
-				Status: "install",
-			})
+			// Check if it's a package group that might be fully installed
+			if isPackageGroupFullyInstalled(pkg, verbose) {
+				actions = append(actions, types.PackageAction{
+					Name:   pkg,
+					Status: "skip",
+				})
+			} else {
+				// Check if this package is already in managed packages but not installed
+				// If so, the managed package cleanup will handle it
+				_, isManaged := managedPackages.Packages[pkg]
+				if !isManaged {
+					// New package not in managed list, mark for installation
+					actions = append(actions, types.PackageAction{
+						Name:   pkg,
+						Status: "install",
+					})
+				}
+				// If it is managed but not installed, the second loop will handle it
+			}
 		} else {
 			actions = append(actions, types.PackageAction{
 				Name:   pkg,
@@ -62,13 +77,29 @@ func AnalyzePackages(configuredPackages []string) ([]types.PackageAction, error)
 		}
 	}
 
-	// Check which managed packages should be removed (no longer in config)
+	// Check which managed packages should be removed (no longer in config or no longer installed)
 	for managedPkg := range managedPackages.Packages {
 		if !contains(configuredPackages, managedPkg) && !contains(constants.DefaultProtectedPackages, managedPkg) {
 			actions = append(actions, types.PackageAction{
 				Name:   managedPkg,
 				Status: "remove",
 			})
+		} else if contains(configuredPackages, managedPkg) && !contains(installedPackages, managedPkg) {
+			// Package is in config and managed but not installed - this can happen if it was manually removed
+			// For package groups, check if the group is fully installed instead
+			if isPackageGroupFullyInstalled(managedPkg, verbose) {
+				// Package group is fully installed, mark as skip
+				actions = append(actions, types.PackageAction{
+					Name:   managedPkg,
+					Status: "skip",
+				})
+			} else {
+				// Individual package or incomplete group - mark for installation
+				actions = append(actions, types.PackageAction{
+					Name:   managedPkg,
+					Status: "install",
+				})
+			}
 		}
 	}
 
@@ -167,14 +198,29 @@ func UpdateManagedPackages(packages []string) error {
 
 	// Update packages
 	for _, pkg := range packages {
+		// Get the installed version of the package using pacman
+		var installedVersion string
+		cmd := exec.Command("pacman", "-Q", pkg)
+		output, err := cmd.Output()
+		if err == nil {
+			parts := strings.Fields(strings.TrimSpace(string(output)))
+			if len(parts) >= 2 {
+				installedVersion = parts[1]
+			}
+		}
+
 		if existing, exists := managedLock.Packages[pkg]; exists {
 			existing.LastSeen = now
+			if installedVersion != "" {
+				existing.InstalledVersion = installedVersion
+			}
 			managedLock.Packages[pkg] = existing
 		} else {
 			managedLock.Packages[pkg] = types.ManagedPackage{
-				FirstManaged:  now,
-				LastSeen:      now,
-				AutoInstalled: true,
+				FirstManaged:     now,
+				LastSeen:         now,
+				InstalledVersion: installedVersion,
+				AutoInstalled:    true,
 			}
 		}
 	}
@@ -312,6 +358,21 @@ func SaveManagedPackages(managedLock *types.ManagedLock) error {
 	return saveManagedPackages(managedLock)
 }
 
+// RemoveFromManagedPackages removes packages from the managed packages lock file
+func RemoveFromManagedPackages(packageNames []string) error {
+	managedLock, err := loadManagedPackages()
+	if err != nil {
+		return fmt.Errorf("failed to load managed packages: %w", err)
+	}
+
+	// Remove the specified packages from the managed list
+	for _, pkgName := range packageNames {
+		delete(managedLock.Packages, pkgName)
+	}
+
+	return saveManagedPackages(managedLock)
+}
+
 // GetManagedPackages returns a list of all managed package names
 func GetManagedPackages() ([]string, error) {
 	managedLock, err := LoadManagedPackages()
@@ -325,6 +386,62 @@ func GetManagedPackages() ([]string, error) {
 	}
 
 	return packages, nil
+}
+
+// isPackageGroupFullyInstalled checks if a package group is already fully installed
+func isPackageGroupFullyInstalled(groupName string, verbose bool) bool {
+	// Get all packages in the group
+	allCmd := exec.Command("yay", "-Sg", groupName)
+	allOutput, err := allCmd.Output()
+	if err != nil {
+		// Debug: print why we're returning false only if verbose is enabled
+		if verbose {
+			fmt.Printf("DEBUG: isPackageGroupFullyInstalled(%s) failed: %v\n", groupName, err)
+		}
+		return false
+	}
+
+	// Get installed packages from the group
+	installedCmd := exec.Command("yay", "-Qg", groupName)
+	installedOutput, err := installedCmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Parse all packages in the group
+	allLines := strings.Split(strings.TrimSpace(string(allOutput)), "\n")
+	if len(allLines) == 0 {
+		return false
+	}
+
+	// Parse installed packages from the group
+	installedLines := strings.Split(strings.TrimSpace(string(installedOutput)), "\n")
+
+	// Extract package names from both lists
+	allPackages := make(map[string]bool)
+	for _, line := range allLines {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			allPackages[parts[1]] = true // Second field is the package name
+		}
+	}
+
+	installedPackages := make(map[string]bool)
+	for _, line := range installedLines {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			installedPackages[parts[1]] = true // Second field is the package name
+		}
+	}
+
+	// Check if all packages in the group are installed
+	for packageName := range allPackages {
+		if !installedPackages[packageName] {
+			return false // This package from the group is not installed
+		}
+	}
+
+	return true // All packages in the group are installed
 }
 
 // contains checks if a slice contains a specific string

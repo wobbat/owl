@@ -156,6 +156,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&options.NoSpinner, "no-spinner", false, "Disable loading animations")
 	rootCmd.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "Show full command output instead of progress spinners")
 	rootCmd.PersistentFlags().BoolVar(&options.Debug, "debug", false, "Enable debug output")
+	rootCmd.PersistentFlags().BoolVar(&options.UseLibALPM, "alpm", false, "Use libalpm for package operations (default: use yay)")
 
 	// Override default help behavior
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
@@ -201,7 +202,7 @@ func setupEnvironmentWithPackageManager() error {
 	if err := setupEnvironment(); err != nil {
 		return err
 	}
-	if err := packages.EnsurePackageManagerReady(); err != nil {
+	if err := packages.EnsurePackageManagerReadyWithFlag(options.UseLibALPM); err != nil {
 		return fmt.Errorf("failed to verify package manager: %w", err)
 	}
 	return nil

@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ type ProgressCallback func(message string)
 type DetailedProgressCallback func(stage string, current, total int64, message string)
 
 // monitorGitCloneProgress monitors git clone output and reports progress
-func monitorGitCloneProgress(cmd *exec.Cmd, packageName string, callback ProgressCallback, detailedCallback DetailedProgressCallback) error {
+func monitorGitCloneProgress(cmd *exec.Cmd, packageName string, callback ProgressCallback) error {
 	// Git clone doesn't provide easy progress tracking, but we can monitor stderr
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -168,7 +169,13 @@ func NewALPMManager() (*ALPMManager, error) {
 
 	handle, err := alpm.Initialize(rootDir, dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize ALPM: %w", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize ALPM due to permissions: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Falling back to pacman command-based operations\n")
+
+		// Create manager without libalpm handle - will use pacman commands
+		return &ALPMManager{
+			handle: nil, // Will use pacman commands instead
+		}, nil
 	}
 
 	manager := &ALPMManager{
@@ -177,7 +184,13 @@ func NewALPMManager() (*ALPMManager, error) {
 
 	if err := manager.setupDatabases(); err != nil {
 		handle.Release()
-		return nil, fmt.Errorf("failed to setup databases: %w", err)
+		fmt.Fprintf(os.Stderr, "Warning: failed to setup ALPM databases: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Falling back to pacman command-based operations\n")
+
+		// Return manager without handle - will use pacman commands
+		return &ALPMManager{
+			handle: nil,
+		}, nil
 	}
 
 	return manager, nil
@@ -398,23 +411,23 @@ func (m *ALPMManager) setupDefaultDatabases() error {
 }
 
 // GetPacmanConfigInfo returns information about the parsed pacman configuration
-func GetPacmanConfigInfo() (map[string]interface{}, error) {
+func GetPacmanConfigInfo() (map[string]any, error) {
 	config, err := parsePacmanConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"architecture": config.Architecture,
 		"rootDir":      config.RootDir,
 		"dbPath":       config.DBPath,
-		"repositories": make(map[string]interface{}),
+		"repositories": make(map[string]any),
 	}
 
 	// Add repository information
-	repos := make(map[string]interface{})
+	repos := make(map[string]any)
 	for name, servers := range config.Repositories {
-		repos[name] = map[string]interface{}{
+		repos[name] = map[string]any{
 			"servers": servers,
 			"count":   len(servers),
 		}
@@ -425,6 +438,24 @@ func GetPacmanConfigInfo() (map[string]interface{}, error) {
 }
 
 func (m *ALPMManager) GetInstalledPackages() ([]string, error) {
+	// If libalpm handle is not available, use pacman command
+	if m.handle == nil {
+		cmd := exec.Command("pacman", "-Qq")
+		output, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get installed packages with pacman: %w", err)
+		}
+
+		var packages []string
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			if line != "" {
+				packages = append(packages, line)
+			}
+		}
+		return packages, nil
+	}
+
 	localDB, err := m.handle.LocalDB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local database: %w", err)
@@ -443,31 +474,102 @@ func (m *ALPMManager) GetInstalledPackages() ([]string, error) {
 }
 
 func (m *ALPMManager) IsPackageInstalled(packageName string) (bool, error) {
+	// If libalpm handle is not available, use pacman command
+	if m.handle == nil {
+		cmd := exec.Command("pacman", "-Qq", packageName)
+		err := cmd.Run()
+		return err == nil, nil
+	}
+
 	installed, err := m.GetInstalledPackages()
 	if err != nil {
 		return false, err
 	}
 
-	for _, pkg := range installed {
-		if pkg == packageName {
-			return true, nil
+	return slices.Contains(installed, packageName), nil
+}
+
+// GetInstalledPackageVersion returns the version of an installed package
+func (m *ALPMManager) GetInstalledPackageVersion(packageName string) string {
+	// If libalpm handle is not available, use pacman command
+	if m.handle == nil {
+		cmd := exec.Command("pacman", "-Q", packageName)
+		output, err := cmd.Output()
+		if err != nil {
+			return ""
 		}
+
+		parts := strings.Fields(strings.TrimSpace(string(output)))
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+		return ""
 	}
-	return false, nil
+
+	localDB, err := m.handle.LocalDB()
+	if err != nil {
+		return ""
+	}
+
+	pkg := localDB.Pkg(packageName)
+	if pkg == nil {
+		return ""
+	}
+
+	return pkg.Version()
 }
 
 // getPackageRepository determines which repository a package belongs to
 func (m *ALPMManager) getPackageRepository(packageName string) (string, error) {
+	// If libalpm handle is not available, use pacman command
+	if m.handle == nil {
+		// Use pacman -Si to check if package is in official repos
+		cmd := exec.Command("pacman", "-Si", packageName)
+		err := cmd.Run()
+		if err == nil {
+			// Package found in official repos, but we can't determine which one without libalpm
+			return "official", nil
+		}
+
+		// Check if it's a package group using pacman -Sg
+		groupCmd := exec.Command("pacman", "-Sg", packageName)
+		err = groupCmd.Run()
+		if err == nil {
+			// Package group found in official repos
+			return "official", nil
+		}
+
+		// Check if package exists in AUR
+		_, err = m.QueryAUR(packageName)
+		if err == nil {
+			return "aur", nil
+		}
+
+		return "", fmt.Errorf("package not found in any repository")
+	}
+
 	// Check official repositories first using ALPM
 	syncDBs, err := m.handle.SyncDBs()
 	if err != nil {
 		return "", fmt.Errorf("failed to get sync databases: %w", err)
 	}
 
+	// Check if it's an individual package
 	for _, db := range syncDBs.Slice() {
 		if pkg := db.Pkg(packageName); pkg != nil {
 			return db.Name(), nil
 		}
+	}
+
+	// Check if it's a package group
+	found := false
+	_ = syncDBs.FindGroupPkgs(packageName).ForEach(func(pkg alpm.IPackage) error {
+		found = true
+		return nil
+	})
+	if found {
+		// Package group found, but we can't determine which specific repository without more complex logic
+		return "official", nil
 	}
 
 	// Check if package exists in AUR
@@ -519,7 +621,7 @@ func (m *ALPMManager) InstallAURPackageWithDetailedProgress(packageName string, 
 	gitURL := fmt.Sprintf("https://aur.archlinux.org/%s.git", packageName)
 	gitCmd := exec.Command("git", "clone", gitURL, tmpDir)
 
-	if err := monitorGitCloneProgress(gitCmd, packageName, progressCallback, detailedCallback); err != nil {
+	if err := monitorGitCloneProgress(gitCmd, packageName, progressCallback); err != nil {
 		return fmt.Errorf("failed to start git clone: %w", err)
 	}
 
@@ -615,6 +717,38 @@ func (m *ALPMManager) InstallOfficialPackageWithProgress(packageName, repository
 		progressCallback(fmt.Sprintf("Checking %s in %s repository", packageName, repository))
 	}
 
+	// If libalpm handle is not available, use pacman command directly
+	if m.handle == nil {
+		if progressCallback != nil {
+			progressCallback(fmt.Sprintf("Installing %s using pacman", packageName))
+		}
+
+		// Check if package is already installed using pacman
+		checkCmd := exec.Command("pacman", "-Qq", packageName)
+		if checkCmd.Run() == nil {
+			if progressCallback != nil {
+				progressCallback(fmt.Sprintf("Package %s is already installed", packageName))
+			}
+			return nil
+		}
+
+		// Install the package using pacman
+		installCmd := exec.Command("sudo", "pacman", "-S", "--noconfirm", packageName)
+		if verbose {
+			installCmd.Stdout = os.Stdout
+			installCmd.Stderr = os.Stderr
+		}
+
+		if err := installCmd.Run(); err != nil {
+			return fmt.Errorf("failed to install package %s with pacman: %w", packageName, err)
+		}
+
+		if progressCallback != nil {
+			progressCallback(fmt.Sprintf("Successfully installed %s", packageName))
+		}
+		return nil
+	}
+
 	// Find the package in sync databases
 	syncDBs, err := m.handle.SyncDBs()
 	if err != nil {
@@ -623,6 +757,9 @@ func (m *ALPMManager) InstallOfficialPackageWithProgress(packageName, repository
 
 	var targetPkg alpm.IPackage
 	var targetDB alpm.IDB
+	var isGroup = false
+
+	// First, try to find as an individual package
 	for _, db := range syncDBs.Slice() {
 		if pkg := db.Pkg(packageName); pkg != nil {
 			targetPkg = pkg
@@ -631,8 +768,43 @@ func (m *ALPMManager) InstallOfficialPackageWithProgress(packageName, repository
 		}
 	}
 
+	// If not found as individual package, check if it's a package group
 	if targetPkg == nil {
+		found := false
+		_ = syncDBs.FindGroupPkgs(packageName).ForEach(func(pkg alpm.IPackage) error {
+			found = true
+			return nil
+		})
+		if found {
+			isGroup = true
+		}
+	}
+
+	if targetPkg == nil && !isGroup {
 		return fmt.Errorf("package %s not found in official repositories", packageName)
+	}
+
+	// If it's a package group, we need to use pacman commands since libalpm doesn't support group installation
+	if isGroup {
+		if progressCallback != nil {
+			progressCallback(fmt.Sprintf("Installing package group %s using pacman", packageName))
+		}
+
+		// Install the package group using pacman
+		installCmd := exec.Command("sudo", "pacman", "-S", "--noconfirm", packageName)
+		if verbose {
+			installCmd.Stdout = os.Stdout
+			installCmd.Stderr = os.Stderr
+		}
+
+		if err := installCmd.Run(); err != nil {
+			return fmt.Errorf("failed to install package group %s with pacman: %w", packageName, err)
+		}
+
+		if progressCallback != nil {
+			progressCallback(fmt.Sprintf("Successfully installed package group %s", packageName))
+		}
+		return nil
 	}
 
 	if progressCallback != nil {
@@ -688,6 +860,99 @@ func (m *ALPMManager) InstallPackageWithProgress(packageName string, verbose boo
 // Legacy method for backward compatibility
 func (m *ALPMManager) InstallPackage(packageName string, verbose bool) error {
 	return m.InstallPackageWithProgress(packageName, verbose, nil)
+}
+
+// InstallPackages installs multiple packages
+func (m *ALPMManager) InstallPackages(packages []string, verbose bool) error {
+	for _, pkg := range packages {
+		if err := m.InstallPackage(pkg, verbose); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SearchPackages searches for packages using libalpm
+func (m *ALPMManager) SearchPackages(searchTerm string) ([]SearchResult, error) {
+	// For now, delegate to pacman command since libalpm search is complex
+	cmd := exec.Command("pacman", "-Ss", searchTerm)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to search packages: %w", err)
+	}
+
+	return parsePacmanSearchOutput(string(output)), nil
+}
+
+// parsePacmanSearchOutput parses pacman search output into SearchResult structs
+func parsePacmanSearchOutput(output string) []SearchResult {
+	var results []SearchResult
+	lines := strings.Split(output, "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+
+		// Check if this is a package line (starts with repo/package)
+		if strings.Contains(line, "/") && !strings.HasPrefix(line, "    ") {
+			parts := strings.SplitN(line, " ", 2)
+			if len(parts) < 2 {
+				continue
+			}
+
+			fullName := parts[0]
+			versionInfo := strings.TrimSpace(parts[1])
+
+			// Parse repository and package name
+			nameParts := strings.Split(fullName, "/")
+			if len(nameParts) != 2 {
+				continue
+			}
+
+			repository := nameParts[0]
+			packageName := nameParts[1]
+
+			// Extract version from the version info
+			version := ""
+			if strings.Contains(versionInfo, " ") {
+				versionParts := strings.Split(versionInfo, " ")
+				if len(versionParts) > 0 {
+					version = versionParts[0]
+				}
+			}
+
+			// Get description from next line if available
+			description := ""
+			if i+1 < len(lines) {
+				nextLine := strings.TrimSpace(lines[i+1])
+				if strings.HasPrefix(nextLine, "    ") {
+					description = strings.TrimSpace(nextLine)
+					i++ // Skip the description line in next iteration
+				}
+			}
+
+			// Check if package is installed (this is a simplified check)
+			installed := false
+			if strings.Contains(versionInfo, "[installed") {
+				installed = true
+			}
+
+			result := SearchResult{
+				Name:        packageName,
+				Version:     version,
+				Description: description,
+				Repository:  repository,
+				Installed:   installed,
+				InConfig:    false, // Not tracked by owl config
+			}
+
+			results = append(results, result)
+		}
+	}
+
+	return results
 }
 
 func (m *ALPMManager) InstallAURPackage(packageName string, verbose bool) error {
@@ -817,6 +1082,32 @@ func (m *ALPMManager) UpgradeSystemWithProgress(verbose bool, progressCallback P
 }
 
 func (m *ALPMManager) GetOutdatedPackages() ([]string, error) {
+	// If libalpm handle is not available, use pacman command
+	if m.handle == nil {
+		cmd := exec.Command("pacman", "-Qu")
+		output, err := cmd.Output()
+		if err != nil {
+			// If no updates available, pacman returns exit code 1 but no error output
+			if cmd.ProcessState.ExitCode() == 1 && len(output) == 0 {
+				return []string{}, nil
+			}
+			return nil, fmt.Errorf("failed to get outdated packages with pacman: %w", err)
+		}
+
+		var outdated []string
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			if line != "" {
+				// Extract package name from the first field
+				parts := strings.Fields(line)
+				if len(parts) > 0 {
+					outdated = append(outdated, parts[0])
+				}
+			}
+		}
+		return outdated, nil
+	}
+
 	// Get local and sync databases
 	localDB, err := m.handle.LocalDB()
 	if err != nil {

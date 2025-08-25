@@ -87,10 +87,11 @@ type ListOptions struct {
 
 // CommandOptions represents common command-line options
 type CommandOptions struct {
-	NoSpinner bool
-	Verbose   bool
-	Debug     bool
-	Devel     bool // Check development packages for updates
+	NoSpinner  bool
+	Verbose    bool
+	Debug      bool
+	Devel      bool // Check development packages for updates
+	UseLibALPM bool // Use libalpm for package operations (default: use yay)
 }
 
 // SearchOptions represents options for package searching

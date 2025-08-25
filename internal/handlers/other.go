@@ -22,38 +22,56 @@ func HandleUpgradeCommand(options *types.CommandOptions) error {
 		Enabled: !options.NoSpinner,
 	})
 
-	// Get outdated packages using ALPM manager
-	alpmMgr, err := packages.NewALPMManager()
+	// Get package manager based on flag
+	packageManager, err := packages.NewPackageManager(options.UseLibALPM)
 	if err != nil {
 		analysisSpinner.Fail("Failed to initialize package manager")
-		return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+		return fmt.Errorf("failed to initialize package manager: %w", err)
 	}
-	defer alpmMgr.Release()
+	defer packageManager.Release()
 
-	// Get AUR updates with devel checking if enabled
-	aurUpdates, err := alpmMgr.GetAURUpdatesWithDevel(options.Devel)
-	if err != nil {
-		analysisSpinner.Fail("Failed to check AUR packages")
-		return fmt.Errorf("failed to check AUR updates: %w", err)
-	}
-
-	// Filter packages that need updates
 	var outdatedPackages []string
-	for _, update := range aurUpdates {
-		if update.NeedsUpdate {
-			outdatedPackages = append(outdatedPackages, update.Name)
+
+	if options.UseLibALPM {
+		// Use ALPM manager for detailed AUR and official package checking
+		alpmMgr, err := packages.NewALPMManager()
+		if err != nil {
+			analysisSpinner.Fail("Failed to initialize ALPM manager")
+			return fmt.Errorf("failed to initialize ALPM manager: %w", err)
+		}
+		defer alpmMgr.Release()
+
+		// Get AUR updates with devel checking if enabled
+		aurUpdates, err := alpmMgr.GetAURUpdatesWithDevel(options.Devel)
+		if err != nil {
+			analysisSpinner.Fail("Failed to check AUR packages")
+			return fmt.Errorf("failed to check AUR updates: %w", err)
+		}
+
+		// Filter packages that need updates
+		for _, update := range aurUpdates {
+			if update.NeedsUpdate {
+				outdatedPackages = append(outdatedPackages, update.Name)
+			}
+		}
+
+		// Also get outdated official packages
+		officialOutdated, err := alpmMgr.GetOutdatedPackages()
+		if err != nil {
+			analysisSpinner.Fail("Failed to check official packages")
+			return fmt.Errorf("failed to check official packages: %w", err)
+		}
+
+		// Combine both lists
+		outdatedPackages = append(outdatedPackages, officialOutdated...)
+	} else {
+		// Use generic package manager for basic functionality
+		outdatedPackages, err = packageManager.GetOutdatedPackages()
+		if err != nil {
+			analysisSpinner.Fail("Failed to check for outdated packages")
+			return fmt.Errorf("failed to check for outdated packages: %w", err)
 		}
 	}
-
-	// Also get outdated official packages
-	officialOutdated, err := alpmMgr.GetOutdatedPackages()
-	if err != nil {
-		analysisSpinner.Fail("Failed to check official packages")
-		return fmt.Errorf("failed to check official packages: %w", err)
-	}
-
-	// Combine both lists
-	outdatedPackages = append(outdatedPackages, officialOutdated...)
 
 	analysisSpinner.Stop(fmt.Sprintf("Found %d packages to upgrade", len(outdatedPackages)))
 
@@ -81,7 +99,7 @@ func HandleUpgradeCommand(options *types.CommandOptions) error {
 		Enabled: !options.NoSpinner && !options.Verbose,
 	})
 
-	err = packages.UpgradeAllPackages(options.Verbose)
+	err = packageManager.UpgradeSystem(options.Verbose)
 	if err != nil {
 		if !options.NoSpinner && !options.Verbose {
 			upgradeSpinner.Fail("System upgrade failed")
@@ -141,10 +159,18 @@ func HandleUninstallCommand(options *types.CommandOptions) error {
 
 	fmt.Println("Removing managed packages...")
 
-	// Remove packages
-	err = packages.RemoveUnmanagedPackages(packageNames, !options.Verbose)
+	// Get package manager based on flag
+	packageManager, err := packages.NewPackageManager(options.UseLibALPM)
 	if err != nil {
-		return fmt.Errorf("uninstall failed: %w", err)
+		return fmt.Errorf("failed to initialize package manager: %w", err)
+	}
+	defer packageManager.Release()
+
+	// Remove packages one by one using the selected package manager
+	for _, pkgName := range packageNames {
+		if err := packageManager.RemovePackage(pkgName); err != nil {
+			return fmt.Errorf("failed to remove package %s: %w", pkgName, err)
+		}
 	}
 
 	// Clear the managed packages file

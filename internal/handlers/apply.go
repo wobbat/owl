@@ -163,7 +163,7 @@ func HandleApplyCommand(dryRun bool, options *types.CommandOptions) error {
 func processPackages(uniquePackages []string, configEntries []types.ConfigEntry, allConfigs []types.ConfigMapping, dryRun bool, options *types.CommandOptions, globalUI *ui.UI) error {
 	// Analyze what packages need to be installed or removed
 	spinner := ui.NewSpinner("Analyzing package status...", types.SpinnerOptions{Enabled: !options.NoSpinner})
-	packageActions, err := packages.AnalyzePackages(uniquePackages)
+	packageActions, err := packages.AnalyzePackages(uniquePackages, options.Verbose)
 	if err != nil {
 		spinner.Fail("Analysis failed")
 		return err
@@ -292,9 +292,28 @@ func removePackages(toRemove []types.PackageAction, options *types.CommandOption
 		packageNames = append(packageNames, pkg.Name)
 	}
 
-	err := packages.RemoveUnmanagedPackages(packageNames, !options.Verbose)
+	// Get package manager based on flag
+	packageManager, err := packages.NewPackageManager(options.UseLibALPM)
 	if err != nil {
-		return fmt.Errorf("failed to remove packages: %w", err)
+		return fmt.Errorf("failed to initialize package manager: %w", err)
+	}
+	defer packageManager.Release()
+
+	// Remove packages one by one using the selected package manager
+	var successfullyRemoved []string
+	for _, pkgName := range packageNames {
+		if err := packageManager.RemovePackage(pkgName); err != nil {
+			return fmt.Errorf("failed to remove package %s: %w", pkgName, err)
+		}
+		successfullyRemoved = append(successfullyRemoved, pkgName)
+	}
+
+	// Update managed packages state to remove the successfully removed packages
+	if len(successfullyRemoved) > 0 {
+		if err := packages.RemoveFromManagedPackages(successfullyRemoved); err != nil {
+			// Log the error but don't fail the operation
+			fmt.Printf("  %s Warning: Failed to update managed packages state: %v\n", ui.Icon.Warn, err)
+		}
 	}
 
 	fmt.Printf("  %s Removed %d packages\n", ui.Icon.Ok, len(toRemove))
@@ -310,14 +329,17 @@ func upgradeSystemPackages(options *types.CommandOptions, globalUI *ui.UI) error
 
 	fmt.Println("Performing system maintenance!")
 
-	var progressCallback func(string)
-	if !options.Verbose && spinner != nil {
-		progressCallback = func(message string) {
-			spinner.Update(message)
+	// Get package manager based on flag
+	packageManager, err := packages.NewPackageManager(options.UseLibALPM)
+	if err != nil {
+		if spinner != nil {
+			spinner.Fail(fmt.Sprintf("Failed to initialize package manager: %v", err))
 		}
+		return fmt.Errorf("failed to initialize package manager: %w", err)
 	}
+	defer packageManager.Release()
 
-	err := packages.UpgradeAllPackagesWithProgress(options.Verbose, progressCallback)
+	err = packageManager.UpgradeSystem(options.Verbose)
 	if err != nil {
 		if spinner != nil {
 			spinner.Fail("Upgrade failed")
@@ -353,15 +375,18 @@ func installNewPackages(toInstall []types.PackageAction, configEntries []types.C
 			Enabled: !options.NoSpinner && !options.Verbose,
 		})
 
-		var progressCallback func(string)
-		if !options.Verbose {
-			progressCallback = func(message string) {
-				spinner.Update(message)
+		// Get package manager based on flag
+		packageManager, err := packages.NewPackageManager(options.UseLibALPM)
+		if err != nil {
+			if !options.Verbose {
+				spinner.Fail(fmt.Sprintf("Failed to initialize package manager: %v", err))
 			}
+			return fmt.Errorf("failed to initialize package manager: %w", err)
 		}
 
-		// Use the new progress-aware installation
-		err := packages.InstallPackagesWithProgress([]string{pkg.Name}, options.Verbose, !options.Verbose, progressCallback)
+		// Use the selected package manager for installation
+		err = packageManager.InstallPackage(pkg.Name, options.Verbose)
+		packageManager.Release()
 
 		if err != nil {
 			if !options.Verbose {
