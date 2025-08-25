@@ -40,7 +40,7 @@ func RunLegacySync(dryRun bool) {
 	uniquePackages := removeDuplicates(allPackages)
 	var packageCount int
 	if len(uniquePackages) > 0 {
-		packageActions, err := packages.AnalyzePackages(uniquePackages)
+		packageActions, err := packages.AnalyzePackages(uniquePackages, false)
 		if err != nil {
 			globalUI.Error(fmt.Sprintf("analyze packages: %v", err))
 			os.Exit(1)
@@ -60,7 +60,15 @@ func RunLegacySync(dryRun bool) {
 	upgradeSpinner := renderer.StartSpinner("Upgrading system packages...")
 
 	if !dryRun {
-		if err := packages.UpgradeAllPackages(false); err != nil {
+		// Use default package manager (yay) for legacy sync
+		packageManager, err := packages.NewPackageManager(false)
+		if err != nil {
+			globalUI.Error(fmt.Sprintf("failed to initialize package manager: %v", err))
+			os.Exit(1)
+		}
+		defer packageManager.Release()
+
+		if err := packageManager.UpgradeSystem(false); err != nil {
 			globalUI.Error(fmt.Sprintf("upgrade system: %v", err))
 			os.Exit(1)
 		}

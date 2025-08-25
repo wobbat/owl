@@ -87,10 +87,11 @@ type ListOptions struct {
 
 // CommandOptions represents common command-line options
 type CommandOptions struct {
-	NoSpinner bool
-	Verbose   bool
-	Debug     bool
-	Devel     bool // Check development packages for updates
+	NoSpinner  bool
+	Verbose    bool
+	Debug      bool
+	Devel      bool // Check development packages for updates
+	UseLibALPM bool // Use libalpm for package operations (default: use yay)
 }
 
 // SearchOptions represents options for package searching
@@ -136,4 +137,10 @@ type ProgressBarOptions struct {
 	Enabled bool
 	Width   int
 	Color   func(string) string
+}
+
+// GroupLoadResult represents the result of loading a group configuration
+type GroupLoadResult struct {
+	Entries    []ConfigEntry `json:"entries"`
+	GlobalEnvs []EnvVar      `json:"global_envs"`
 }
