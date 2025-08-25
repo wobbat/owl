@@ -138,3 +138,9 @@ type ProgressBarOptions struct {
 	Width   int
 	Color   func(string) string
 }
+
+// GroupLoadResult represents the result of loading a group configuration
+type GroupLoadResult struct {
+	Entries    []ConfigEntry `json:"entries"`
+	GlobalEnvs []EnvVar      `json:"global_envs"`
+}

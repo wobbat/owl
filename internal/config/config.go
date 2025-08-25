@@ -167,7 +167,8 @@ func parseOwlConfigFile(filePath string, options ParseOptions) (*ConfigResult, e
 				}
 				continue
 			}
-			entries = append(entries, groupEntries...)
+			entries = append(entries, groupEntries.Entries...)
+			globalEnvs = append(globalEnvs, groupEntries.GlobalEnvs...)
 			continue
 		}
 
@@ -370,7 +371,7 @@ func parseOwlConfigFile(filePath string, options ParseOptions) (*ConfigResult, e
 }
 
 // loadGroup loads a group configuration file
-func loadGroup(groupName string, visited map[string]bool, basePath string) ([]types.ConfigEntry, error) {
+func loadGroup(groupName string, visited map[string]bool, basePath string) (*types.GroupLoadResult, error) {
 	if visited[groupName] {
 		return nil, &ConfigParseError{
 			FilePath: filepath.Join(basePath, constants.OwlGroupsDir, groupName+".owl"),
@@ -401,7 +402,10 @@ func loadGroup(groupName string, visited map[string]bool, basePath string) ([]ty
 		return nil, err
 	}
 
-	return result.Entries, nil
+	return &types.GroupLoadResult{
+		Entries:    result.Entries,
+		GlobalEnvs: result.GlobalEnvs,
+	}, nil
 }
 
 // createEntry creates a new ConfigEntry
