@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
+	"owl/internal/config"
+	"owl/internal/constants"
 	"owl/internal/packages"
 	"owl/internal/types"
 	"owl/internal/ui"
@@ -263,4 +267,102 @@ func generateVCSInfoForPackage(packageName string, vcsStore *packages.VCSStore) 
 
 	// Update VCS info
 	return vcsStore.UpdatePackageInfo(packageName, string(pkgbuildContent))
+}
+
+// HandleDoteditCommand handles the dotedit command
+func HandleDoteditCommand(target string, globalUI *ui.UI) error {
+	// Get EDITOR environment variable
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		return fmt.Errorf("EDITOR environment variable is not set")
+	}
+
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	// Load configuration to find dotfile mappings
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("failed to get hostname: %w", err)
+	}
+
+	configResult, err := config.LoadConfigForHost(hostname)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Look for the target dotfile in configuration mappings
+	var targetPath string
+	var found bool
+
+	// Search through all config entries for matching dotfile name
+	for _, entry := range configResult.Entries {
+		for _, configMapping := range entry.Configs {
+			// Check if source path ends with the target name
+			sourcePath := configMapping.Source
+
+			// Handle relative paths - make them absolute relative to dotfiles directory
+			if !filepath.IsAbs(sourcePath) && !strings.HasPrefix(sourcePath, "./") && !strings.HasPrefix(sourcePath, "../") {
+				sourcePath = filepath.Join(homeDir, constants.OwlRootDir, constants.OwlDotfilesDir, sourcePath)
+			}
+
+			// Check if this matches our target
+			if strings.HasSuffix(sourcePath, target) || filepath.Base(sourcePath) == target {
+				targetPath = sourcePath
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	// If not found in config mappings, check if it's a direct path in dotfiles directory
+	if !found {
+		dotfilesPath := filepath.Join(homeDir, constants.OwlRootDir, constants.OwlDotfilesDir, target)
+		if _, err := os.Stat(dotfilesPath); err == nil {
+			targetPath = dotfilesPath
+			found = true
+		}
+	}
+
+	// If still not found, check if target is a directory and open the whole directory
+	if !found {
+		dotfilesDirPath := filepath.Join(homeDir, constants.OwlRootDir, constants.OwlDotfilesDir, target)
+		if info, err := os.Stat(dotfilesDirPath); err == nil && info.IsDir() {
+			targetPath = dotfilesDirPath
+			found = true
+		}
+	}
+
+	// If still not found, default to opening the entire dotfiles directory
+	if !found {
+		targetPath = filepath.Join(homeDir, constants.OwlRootDir, constants.OwlDotfilesDir)
+		globalUI.Info(fmt.Sprintf("Dotfile '%s' not found in configuration, opening dotfiles directory", target))
+	}
+
+	// Ensure the target path exists
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		// If the specific file doesn't exist, create the dotfiles directory if it doesn't exist
+		dotfilesDir := filepath.Join(homeDir, constants.OwlRootDir, constants.OwlDotfilesDir)
+		if err := os.MkdirAll(dotfilesDir, 0755); err != nil {
+			return fmt.Errorf("failed to create dotfiles directory: %w", err)
+		}
+		targetPath = dotfilesDir
+		globalUI.Info(fmt.Sprintf("Created dotfiles directory: %s", dotfilesDir))
+	}
+
+	globalUI.Info(fmt.Sprintf("Opening %s with %s", targetPath, editor))
+
+	// Execute the editor command
+	cmd := exec.Command(editor, targetPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }

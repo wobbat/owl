@@ -646,6 +646,7 @@ func (u *UI) ShowHelp() {
 		"apply          Install packages, copy configs, and run setup scripts",
 		"dry-run, dr    Preview what would be done without making changes",
 		"dots           Check and sync only dotfiles configurations",
+		"de, dotedit    Edit dotfile configurations using the system editor",
 		"uninstall      Remove all managed packages and configs",
 	}, types.ListOptions{
 		Indent: true,

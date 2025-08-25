@@ -129,6 +129,18 @@ var dotsCmd = &cobra.Command{
 	},
 }
 
+// deCmd represents the dotedit command
+var deCmd = &cobra.Command{
+	Use:     "de",
+	Aliases: []string{"dotedit"},
+	Short:   "Edit dotfile configurations using the system editor",
+	Long:    `Open dotfile configurations in the system editor (defined by EDITOR environment variable)`,
+	Args:    cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		handleDoteditCommand(args[0])
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(dryRunCmd)
@@ -138,6 +150,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(gendbCmd)
 	rootCmd.AddCommand(dotsCmd)
+	rootCmd.AddCommand(deCmd)
 
 	// Add --devel flag to upgrade command
 	upgradeCmd.Flags().Bool("devel", false, "Check development packages (-git, -hg, etc.) for updates")
@@ -263,4 +276,14 @@ func handleDotsCommand(dryRun bool) {
 	}
 
 	handleCommandError(handlers.HandleDotsCommand(dryRun, options), "Dots command failed")
+}
+
+// handleDoteditCommand handles the dotedit command
+func handleDoteditCommand(target string) {
+	if err := setupEnvironment(); err != nil {
+		globalUI.Error(err.Error())
+		os.Exit(1)
+	}
+
+	handleCommandError(handlers.HandleDoteditCommand(target, globalUI), "Dotedit command failed")
 }
