@@ -16,10 +16,13 @@ import terminal.options;
 import terminal.ui;
 import terminal.colors;
 import terminal.prompt;
+import terminal.apply;
 import config.loader;
 import config.parser;
 import config.paths;
 import utils.process;
+import utils.common;
+import utils.selection;
 import config.write;
 import packages.packages;
 import packages.pacman;
@@ -35,20 +38,7 @@ import packages.pkgbuild;
 
 string currentHost()
 {
-    string hostname = "localhost";
-    try
-    {
-        if (exists("/etc/hostname"))
-        {
-            hostname = readText("/etc/hostname").strip();
-        }
-    }
-    catch (Exception)
-    {
-        // Try environment variable
-        hostname = environment.get("HOSTNAME", "localhost");
-    }
-    return hostname;
+    return HostDetection.detect();
 }
 
 struct ConfigAnalysis
@@ -105,589 +95,15 @@ int runApplyCommand(const CommandCall cc)
     auto opts = parseCommandOptions(cc.flags, cc.arguments);
     bool dryRun = opts.dryRun || ("dry-run" in cc.flags);
 
-    return apply(dryRun, opts);
-}
-
-int apply(bool dryRun, CommandOptions options)
-{
-    string host = currentHost();
-    auto analysis = analyzeConfiguration(host);
-
-    // Assume AUR available unless explicitly disabled; avoid early network check.
-    bool aurAvailable = !options.noAur;
-
-    // Analyze: compute package plan
-    sectionHeader("Analyze", "blue");
-    auto s = newSpinner("Analyzing package status...", !options.noSpinner);
-    auto plan = planPackageActions(analysis.uniquePackages);
-    s.stop("Analysis complete");
-
-    // Debug info: show inputs used for planning
-    if (options.debugMode)
-    {
-        sectionHeader("Debug", "magenta");
-        writeln("Host used: " ~ analysis.host);
-        writeln("");
-        writeln("Parsed desired packages (" ~ to!string(analysis.uniquePackages.length) ~ "):");
-        auto ups = analysis.uniquePackages.dup.sort;
-        foreach (p; ups)
-        {
-            writeln("  - " ~ p);
-        }
-        writeln("");
-    }
-
-    string[] toInstall = plan.filter!(p => p.status == PackageActionStatus.install)
-        .map!(p => p.name)
-        .array;
-    string[] toRemove = plan.filter!(p => p.status == PackageActionStatus.remove)
-        .map!(p => p.name)
-        .array;
-
-    if (options.debugMode)
-    {
-        writeln("Plan: toInstall=" ~ to!string(
-                toInstall.length) ~ ", toRemove=" ~ to!string(toRemove.length));
-        if (toRemove.length > 0)
-        {
-            writeln("  Will remove (managed but not in config):");
-            auto tr = toRemove.dup.sort;
-            foreach (n; tr)
-            {
-                writeln("    - " ~ n);
-            }
-        }
-    }
-
-    // Info section
-    sectionHeader("Info", "red");
-    overview(analysis.host, cast(int) analysis.uniquePackages.length);
-
-    // Optional: show number of dotfile packages
-    int dotPkgCount = 0;
-    foreach (entry; analysis.conf.entries)
-    {
-        if (entry.configs.length > 0)
-            dotPkgCount++;
-    }
-    if (dotPkgCount > 0)
-    {
-        writeln("  dotfiles: " ~ to!string(dotPkgCount));
-        writeln("");
-    }
+    auto ctx = initializeApplyContext(dryRun, opts);
+    showAnalysisPhase(ctx);
 
     if (dryRun)
     {
-        if (toInstall.length > 0 || toRemove.length > 0)
-        {
-            installHeader();
-            foreach (name; toInstall)
-            {
-                packageInstallProgress(name);
-            }
-            if (toRemove.length > 0)
-            {
-                writeln("Package removal simulation:");
-                foreach (name; toRemove)
-                {
-                    writeln("  " ~ errorText("remove") ~ " Would remove: " ~ packageName(name));
-                }
-            }
-            success("Package analysis completed (dry-run mode)");
-        }
-
-        // Config/dotfiles dry-run section (always show like legacy)
-        configManagementHeader();
-
-        if (dotPkgCount > 0)
-        {
-            string summary = dotPkgCount <= 5 ? to!string(dotPkgCount) ~ " packages" : to!string(
-                    dotPkgCount) ~ " packages";
-            configPackagesSummary(summary);
-            auto dspin = newSpinner("    Dotfiles - checking...",
-                    !options.noSpinner && !options.verbose);
-            dspin.stop("");
-
-            // Check if ANY actions are needed across all packages
-            bool hasAnyActions = false;
-            foreach (entry; analysis.conf.entries)
-            {
-                if (entry.configs.length > 0)
-                {
-                    DotfileMapping[] mappings;
-                    foreach (cfg; entry.configs)
-                    {
-                        mappings ~= DotfileMapping(cfg.source, cfg.dest);
-                    }
-                    if (hasActionableDotfiles(mappings))
-                    {
-                        hasAnyActions = true;
-                        break;
-                    }
-                }
-            }
-
-            if (hasAnyActions)
-            {
-                // Show individual package actions when changes are needed
-                foreach (entry; analysis.conf.entries)
-                {
-                    if (entry.configs.length > 0)
-                    {
-                        DotfileMapping[] mappings;
-                        foreach (cfg; entry.configs)
-                        {
-                            mappings ~= DotfileMapping(cfg.source, cfg.dest);
-                        }
-                        auto actions = analyzeDotfiles(mappings);
-                        bool hasPackageActions = false;
-                        foreach (action; actions)
-                        {
-                            if (action.status == "create"
-                                    || action.status == "update" || action.status == "conflict")
-                            {
-                                hasPackageActions = true;
-                                break;
-                            }
-                        }
-                        if (hasPackageActions)
-                        {
-                            writeln("  " ~ entry.pkgName ~ " ->");
-                            foreach (action; actions)
-                            {
-                                if (action.status == "create")
-                                {
-                                    writeln("    Copy: " ~ action.source
-                                            ~ " -> " ~ action.destination);
-                                }
-                                else if (action.status == "update")
-                                {
-                                    writeln(
-                                            "    Replace: " ~ action.destination
-                                            ~ " ← " ~ action.source);
-                                }
-                                else if (action.status == "conflict")
-                                {
-                                    writeln("    Conflict: " ~ action.destination ~ (action.reason.length > 0
-                                            ? " (" ~ action.reason ~ ")" : ""));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                showDotfilesUpToDate(0);
-            }
-        }
-        else
-        {
-            showDotfilesUpToDate(0);
-        }
-
-        writeln("");
-
-        // Services dry-run
-        if (analysis.allServices.length > 0)
-        {
-            sectionHeader("Services", "teal");
-            writeln("  Plan:");
-            foreach (svc; analysis.allServices)
-            {
-                writeln("    ✓ Would manage " ~ packageName(svc) ~ " (system) [enable, start]");
-            }
-            writeln("");
-            writeln("  ✓ Planned " ~ to!string(analysis.allServices.length) ~ " service(s)");
-            writeln("");
-        }
-
-        // Env dry-run
-        if (analysis.allEnvs.length > 0 || analysis.conf.globalEnvs.length > 0)
-        {
-            sectionHeader("Environment", "blue");
-            if (analysis.allEnvs.length > 0)
-            {
-                writeln("Environment variables to set:");
-                foreach (k, v; analysis.allEnvs)
-                {
-                    writeln("  ✓ Would set: " ~ packageName(k) ~ "=" ~ successText(v));
-                }
-                writeln("");
-            }
-            if (analysis.conf.globalEnvs.length > 0)
-            {
-                writeln("Global environment variables to set:");
-                foreach (k, v; analysis.conf.globalEnvs)
-                {
-                    writeln("  ✓ Would set global: " ~ packageName(k) ~ "=" ~ successText(v));
-                }
-                writeln("");
-            }
-        }
-        return 0;
+        return handleDryRun(ctx);
     }
 
-    // Real apply path
-    // Upgrade system packages (repos first, then AUR updates)
-    // Pkg management unified section (remove, upgrade, install)
-    sectionHeader("Pkg management", "yellow");
-
-    // Show combined upgrade plan (repo + AUR) once
-    auto upgradeSpinner = newSpinner("Checking for package upgrades...", !options.noSpinner);
-    ProgressCallback upgradeProgress = (string msg) {
-        if (!options.noSpinner)
-            upgradeSpinner.update(msg);
-        else
-            writeln(msg);
-    };
-    auto allOutdated = getOutdatedPackages(!options.noAur, options.dev, upgradeProgress);
-    upgradeSpinner.stop("Package upgrade check complete");
-    if (allOutdated.length > 0)
-    {
-        writeln("  Packages to upgrade:");
-        foreach (pkg; allOutdated)
-        {
-            if (pkg.source == "aur")
-            {
-                writeln(upgradePackageLine(pkg.name, "aur"));
-            }
-            else
-            {
-                string rep = getPackageRepository(pkg.name);
-                writeln(upgradePackageLine(pkg.name, rep));
-            }
-        }
-        writeln("");
-    }
-
-    // If there is truly nothing to do in package mgmt, say so once
-    if (toInstall.length == 0 && toRemove.length == 0 && allOutdated.length == 0)
-    {
-        ok("There is nothing to do :)");
-        writeln("");
-    }
-
-    // Remove unmanaged packages first (if any)
-    if (toRemove.length > 0)
-    {
-        writeln("Package cleanup (removing conflicting packages):");
-        foreach (name; toRemove)
-        {
-            writeln("  " ~ errorText("remove") ~ " Removing: " ~ packageName(name));
-        }
-        removeUnmanagedPackages(toRemove, !options.verbose);
-        showPackagesRemoved(cast(int) toRemove.length);
-    }
-
-    auto repoOutdated = getOutdatedPackages(false);
-    if (repoOutdated.length > 0)
-    {
-        applySystemUpgrade(options, (toInstall.length == 0 && toRemove.length == 0));
-    }
-
-    if (aurAvailable)
-    {
-        auto aurOutdated = allOutdated.filter!(p => p.source == "aur").array;
-        if (aurOutdated.length > 0)
-        {
-            applyAurUpgrades(options, aurOutdated);
-        }
-        if (options.dev)
-        {
-            applyVcsUpgrades(options);
-        }
-    }
-
-    // Install new packages (if any)
-    if (toInstall.length > 0)
-    {
-        installHeader();
-        foreach (name; toInstall)
-        {
-            auto sp = newSpinner("Installing " ~ name, !options.noSpinner && !options.verbose);
-
-            // Progress callback for updating spinner text
-            ProgressCallback progress = (string msg) {
-                if (!options.noSpinner && !options.verbose)
-                {
-                    sp.update(msg);
-                }
-            };
-
-            // Tick callback for spinner animation
-            void delegate() onTick = () {
-                if (!options.noSpinner && !options.verbose)
-                {
-                    sp.tick();
-                }
-            };
-
-            // Try repo install first
-            int codeRepo = installRepoPackages([name], true, true, progress, onTick);
-            if (codeRepo == 0)
-            {
-                sp.update("Successfully installed " ~ name ~ " from official repositories");
-                if (!options.verbose)
-                    sp.stop("installed");
-                continue;
-            }
-
-            // Fallback to AUR if allowed
-            if (aurAvailable && !options.noAur)
-            {
-                try
-                {
-                    // Build and install AUR package
-                    import packages.aur_build;
-
-                    ProgressCallback aurProgress = (string msg) {
-                        if (!options.noSpinner && !options.verbose)
-                        {
-                            sp.update(msg);
-                        }
-                    };
-
-                    if (buildAndInstallAurPackage(name, aurProgress,
-                            options.safety, !options.unsafe))
-                    {
-                        sp.update("Successfully installed " ~ name ~ " from AUR");
-                        if (!options.verbose)
-                            sp.stop("installed");
-                    }
-                    else
-                    {
-                        if (!options.verbose)
-                            sp.fail("build failed");
-                    }
-                }
-                catch (Exception)
-                {
-                    if (!options.verbose)
-                        sp.fail("failed");
-                }
-            }
-            else
-            {
-                if (!options.verbose)
-                    sp.fail("install failed");
-            }
-        }
-    }
-
-    // Update managed package tracking
-    updateManagedPackages(analysis.uniquePackages);
-
-    // Always show Config section like legacy, even when no dotfiles exist
-    configManagementHeader();
-
-    if (dotPkgCount > 0)
-    {
-        string summary = dotPkgCount <= 5 ? to!string(dotPkgCount) ~ " packages" : to!string(
-                dotPkgCount) ~ " packages";
-        configPackagesSummary(summary);
-
-        // First pass: check if ANY actions are needed across all packages
-        bool hasAnyActions = false;
-        foreach (entry; analysis.conf.entries)
-        {
-            if (entry.configs.length > 0)
-            {
-                DotfileMapping[] mappings;
-                foreach (cfg; entry.configs)
-                {
-                    mappings ~= DotfileMapping(cfg.source, cfg.dest);
-                }
-                if (hasActionableDotfiles(mappings))
-                {
-                    hasAnyActions = true;
-                    break;
-                }
-            }
-        }
-
-        if (!hasAnyActions)
-        {
-            // All packages up-to-date: show summary format like legacy  
-            int dur = 0; // No spinner needed for immediate check
-            showDotfilesUpToDate(dur);
-        }
-        else
-        {
-            // Execute dotfile operations and show results
-            auto startTime = nowMs();
-            int totalActions = 0;
-
-            foreach (entry; analysis.conf.entries)
-            {
-                if (entry.configs.length > 0)
-                {
-                    DotfileMapping[] mappings;
-                    foreach (cfg; entry.configs)
-                    {
-                        mappings ~= DotfileMapping(cfg.source, cfg.dest);
-                    }
-                    auto actions = applyDotfiles(mappings);
-                    bool hasPackageActions = false;
-                    foreach (action; actions)
-                    {
-                        if (action.status == "create"
-                                || action.status == "update" || action.status == "conflict")
-                        {
-                            hasPackageActions = true;
-                            totalActions++;
-                        }
-                    }
-                    if (hasPackageActions)
-                    {
-                        writeln("  " ~ entry.pkgName ~ " ->");
-                        foreach (action; actions)
-                        {
-                            if (action.status == "create")
-                            {
-                                writeln("    Copy: " ~ action.source ~ " -> " ~ action.destination);
-                            }
-                            else if (action.status == "update")
-                            {
-                                writeln("    Replace: " ~ action.source ~ " -> "
-                                        ~ action.destination);
-                            }
-                            else if (action.status == "conflict")
-                            {
-                                writeln("    Conflict: " ~ action.destination ~ (action.reason.length > 0
-                                        ? " (" ~ action.reason ~ ")" : ""));
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Show completion summary
-            auto duration = nowMs() - startTime;
-            if (totalActions > 0)
-            {
-                writeln("  Dotfiles - " ~ successText("synced") ~ " " ~ dim(format("(%d actions, %dms)",
-                        totalActions, duration)));
-            }
-            else
-            {
-                writeln("  Dotfiles - " ~ successText("up to date") ~ " " ~ dim(format("(%dms)",
-                        duration)));
-            }
-        }
-    }
-    else
-    {
-        // No dotfiles to manage, show up to date message anyway
-        showDotfilesUpToDate(0);
-    }
-
-    writeln("");
-
-    // Run setup scripts (global first as constructed above)
-    if (analysis.allSetups.length > 0)
-    {
-        runSetupScripts(analysis.allSetups);
-    }
-
-    // Services
-    if (analysis.allServices.length > 0)
-    {
-        sectionHeader("Services", "teal");
-        auto svspin = newSpinner("Validating services...", !options.noSpinner && !options.verbose);
-
-        auto res = ensureServicesConfigured(analysis.allServices);
-        if (res.changed)
-        {
-            svspin.stop("Services configured");
-            writeln("");
-            writeln("  " ~ symbolOk() ~ " Managed " ~ to!string(
-                    analysis.allServices.length) ~ " service(s)");
-
-            if (res.enabledServices.length > 0)
-            {
-                writeln("    Enabled: " ~ res.enabledServices.join(", "));
-            }
-            if (res.startedServices.length > 0)
-            {
-                writeln("    Started: " ~ res.startedServices.join(", "));
-            }
-            if (res.failedServices.length > 0)
-            {
-                writeln("    " ~ errorText("Failed: " ~ res.failedServices.join(", ")));
-            }
-            writeln("");
-        }
-        else
-        {
-            svspin.stop("Service state verified");
-            writeln("");
-        }
-    }
-
-    // Environment variables
-    if (analysis.allEnvs.length > 0)
-    {
-        sectionHeader("Environment", "blue");
-
-        // Convert from associative array to array of pairs
-        import systems.env;
-
-        string[2][] allEnvironmentVars;
-        foreach (key, value; analysis.allEnvs)
-        {
-            allEnvironmentVars ~= [key, value];
-        }
-
-        auto envComparison = compareEnvVars(allEnvironmentVars);
-        setEnvironmentVariables(allEnvironmentVars);
-
-        // Display environment variable changes intelligently
-        if (envComparison.added.length > 0)
-        {
-            foreach (env; envComparison.added)
-            {
-                ok("Set: " ~ packageName(env[0]) ~ "=" ~ successText(env[1]));
-            }
-        }
-
-        if (envComparison.updated.length > 0)
-        {
-            foreach (env; envComparison.updated)
-            {
-                ok("Updated: " ~ packageName(env[0]) ~ "=" ~ successText(env[1]));
-            }
-        }
-
-        if (envComparison.removed.length > 0)
-        {
-            foreach (key; envComparison.removed)
-            {
-                ok("Removed: " ~ packageName(key));
-            }
-        }
-
-        if (envComparison.unchanged.length > 0 && envComparison.added.length == 0
-                && envComparison.updated.length == 0 && envComparison.removed.length == 0)
-        {
-            ok("Environment variables maintained (" ~ to!string(
-                    envComparison.unchanged.length) ~ " unchanged)");
-        }
-        else if (envComparison.unchanged.length > 0)
-        {
-            import terminal.colors : dim;
-
-            writeln("  " ~ dim("(" ~ to!string(
-                    envComparison.unchanged.length) ~ " environment variables unchanged)"));
-        }
-
-        if (allEnvironmentVars.length > 0)
-        {
-            writeln("");
-        }
-    }
-
-    return 0;
+    return executeApply(ctx);
 }
 
 void applySystemUpgrade(CommandOptions options, bool nothingToInstall)
@@ -876,11 +292,6 @@ void applyVcsUpgrades(CommandOptions options)
     }
 }
 
-string upgradePackageLine(string name, string repo)
-{
-    return "    " ~ warningText("upgrade") ~ " " ~ packageName(name) ~ " (" ~ repo ~ ")";
-}
-
 void showAllPackagesUpgraded()
 {
     writeln("  " ~ symbolOk() ~ " All packages upgraded to latest versions");
@@ -960,11 +371,6 @@ int runUpgradeCommand(const CommandCall cc)
 
     showAllPackagesUpgraded();
     return 0;
-}
-
-void configPackagesSummary(string summary)
-{
-    writeln("  " ~ summary);
 }
 
 int runAddCommand(const CommandCall cc)
@@ -1252,6 +658,8 @@ int runTrackCommand(const CommandCall cc)
 /// Track explicitly-installed packages into configuration
 int trackPackages(const string[] args, CommandOptions options)
 {
+    import utils.selection;
+
     string host = currentHost();
     auto candidates = computeTrackCandidates(host);
 
@@ -1263,26 +671,17 @@ int trackPackages(const string[] args, CommandOptions options)
 
     writeln("\n" ~ bold("Found") ~ " " ~ to!string(candidates.length) ~ " untracked package(s):\n");
 
-    // Display packages in countdown order (most relevant at bottom)
-    foreach (ulong i; 1 .. candidates.length + 1)
-    {
-        ulong idx = candidates.length - i;
-        string pkg = candidates[idx];
-        string numberPart = successText("[") ~ to!string(i) ~ successText("]");
-        writeln(numberPart ~ " " ~ packageName(pkg));
-    }
-    writeln("");
+    displayCountdownSelection(candidates, (string item, size_t num) {
+        return packageSelectionFormatter(item, num);
+    });
 
-    int selection = promptSelection(cast(int) candidates.length);
-    if (selection <= 0 || selection > candidates.length)
+    auto packageResult = handleSelection(candidates);
+    if (!packageResult.valid)
     {
         return 0;
     }
 
-    // Fix selection mapping: reverse the index to match display order
-    string selected = candidates[candidates.length - selection];
-
-    // Select config file
+    string selected = packageResult.item;
     auto files = getRelevantConfigFilesForCurrentSystem();
     string targetFile = "";
 
@@ -1299,34 +698,21 @@ int trackPackages(const string[] args, CommandOptions options)
     {
         writeln("\n" ~ bold("Select a configuration file:") ~ "\n");
 
-        // Display files in countdown order (most relevant at bottom)
-        foreach (ulong i; 1 .. files.length + 1)
-        {
-            ulong idx = files.length - i;
-            string file = files[idx];
-            string friendly = file.replace(environment["HOME"], "~");
-            string numberPart = successText("[") ~ to!string(i) ~ successText("]");
-            string fileName = packageName(friendly.split('/')[$ - 1]);
-            string pathPart = "(" ~ friendly ~ ")";
-            writeln(numberPart ~ " " ~ fileName ~ " " ~ pathPart);
-        }
-        writeln("");
+        string homeDir = environment["HOME"];
+        displayCountdownSelection(files, (string file, size_t num) {
+            return fileSelectionFormatter(file, num, homeDir);
+        });
 
-        int pick = promptSelection(cast(int) files.length);
-        if (pick <= 0 || pick > files.length)
+        auto fileResult = handleSelection(files);
+        if (!fileResult.valid)
         {
             errorOutput("Invalid selection");
             return 1;
         }
-        string homeDir = environment["HOME"];
-        // Fix selection mapping: reverse the index to match display order
-        targetFile = files[files.length - pick].replace(homeDir, "~");
+        targetFile = fileResult.item.replace(homeDir, "~");
     }
 
-    // Add package to config file
     addPackageToFile(selected, targetFile);
-    import terminal.ui;
-
     success("Tracked '" ~ selected ~ "' in " ~ targetFile);
     return 0;
 }

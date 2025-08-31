@@ -97,116 +97,17 @@ import terminal.commands;
 
 int runCheck(const CommandCall cc)
 {
-    import std.stdio : writeln;
     import std.process : environment;
     import std.path : buildPath;
+    import config.analysis;
 
     string home = environment["HOME"];
     string configDir = buildPath(home, ".owl");
-    import std.file : read;
+    string hostname = resolveHostname(cc);
 
-    string hostname = "localhost";
-    try
-    {
-        hostname = cast(string) read("/etc/hostname");
-        import std.string : strip;
+    auto analysis = analyzeConfigChain(hostname, configDir);
+    displayConfigAnalysis(analysis);
 
-        hostname = hostname.strip;
-
-    }
-    catch (Exception e)
-    {
-    }
-    if ("host" in cc.flags && cc.arguments.length > 0)
-        hostname = cc.arguments[0];
-    auto result = loadConfigChain(configDir, hostname);
-    import std.algorithm : sum;
-
-    size_t pkgCount, dotCount, envCount, svcCount, setupCount;
-    foreach (entry; result.entries)
-    {
-        if (entry.pkgName.startsWith(":") || entry.pkgName.startsWith("@")
-                || entry.pkgName.startsWith("!"))
-            continue;
-        pkgCount++;
-        dotCount += entry.configs.length;
-        envCount += entry.envs.length;
-        svcCount += entry.services.length;
-        setupCount += entry.setups.length;
-    }
-    envCount += result.globalEnvs.length;
-    setupCount += result.globalScripts.length;
-    writeln(bold(cyan("Parsed Config Chain:")));
-    writeln("Packages:");
-    // Print packages below
-    import std.conv : to;
-
-    string summaryLine = "Packages: " ~ to!string(pkgCount) ~ " | Dotfiles: " ~ to!string(
-            dotCount) ~ " | Envs: " ~ to!string(envCount) ~ " | Services: " ~ to!string(
-            svcCount) ~ " | Setups: " ~ to!string(setupCount);
-
-    foreach (entry; result.entries)
-    {
-        if (entry.pkgName.startsWith(":") || entry.pkgName.startsWith("@")
-                || entry.pkgName.startsWith("!"))
-            continue;
-        string line = bold(entry.pkgName) ~ " [" ~ entry.sourceFile ~ "]";
-        if (entry.configs.length > 0)
-        {
-            line ~= " | configs: ";
-            string[] cfgs;
-            foreach (cfg; entry.configs)
-                cfgs ~= cfg.source ~ "->" ~ cfg.dest;
-            line ~= cfgs.join(", ");
-        }
-        if (entry.setups.length > 0)
-        {
-            line ~= " | setup: ";
-            line ~= entry.setups.join(", ");
-        }
-        if (entry.services.length > 0)
-        {
-            line ~= " | service: ";
-            line ~= entry.services.join(", ");
-        }
-        if (entry.envs.length > 0)
-        {
-            line ~= " | env: ";
-            string[] envs;
-            foreach (k, v; entry.envs)
-                envs ~= k ~ "=" ~ v;
-            line ~= envs.join(", ");
-        }
-        writeln(line);
-    }
-    writeln("");
-    writeln(bold(cyan("Global @env:")));
-    string[] envs;
-    foreach (k, v; result.globalEnvs)
-        envs ~= k ~ "=" ~ v;
-    if (envs.length > 0)
-        writeln(envs.join(" | "));
-    writeln("");
-    writeln(bold(cyan("Global Scripts:")));
-    if (result.globalScripts.length > 0)
-        writeln(result.globalScripts.join(" | "));
-    writeln("");
-    // Print any global services blocks (if present)
-    auto globalServices = result.entries.filter!(e => e.pkgName == "__services__");
-    foreach (entry; globalServices)
-    {
-        if (entry.services.length > 0)
-        {
-            writeln(bold(cyan("Global @service blocks:")));
-            foreach (svc; entry.services)
-            {
-                writeln("  ", svc);
-            }
-        }
-    }
-    writeln("");
-    writeln(bold(cyan("Summary:")));
-    writeln(summaryLine);
     return 0;
 }
 
@@ -221,7 +122,6 @@ int runApply(const CommandCall cc)
 
 int runDryRun(const CommandCall cc)
 {
-    // Add dry-run flag and delegate to apply
     CommandCall modifiedCc;
     modifiedCc.command = cc.command;
     modifiedCc.arguments = cc.arguments.dup;
@@ -255,12 +155,6 @@ int runAdd(const CommandCall cc)
     return runAddCommand(cc);
 }
 
-int runSearch(const CommandCall cc)
-{
-    writeln(bold(cyan("search: Search for packages in repositories and AUR")));
-    return 0;
-}
-
 int runConfigEdit(const CommandCall cc)
 {
     return runConfigEditCommand(cc);
@@ -274,6 +168,12 @@ int runDotEdit(const CommandCall cc)
 int runUpgrade(const CommandCall cc)
 {
     return runUpgradeCommand(cc);
+}
+
+int runSearch(const CommandCall cc)
+{
+    writeln(bold(cyan("search: Search for packages in repositories and AUR")));
+    return 0;
 }
 
 int runUninstall(const CommandCall cc)
