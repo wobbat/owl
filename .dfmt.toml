@@ -1,0 +1,3 @@
+brace_style = "otbs"   # { stays on same line, } else { inline
+indent_size = 4
+

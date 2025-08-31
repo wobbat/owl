@@ -1,0 +1,246 @@
+module utils.sh;
+
+// A tiny Bun-like shell template for D: sh!`...`(args...)
+// Supports ${0}, ${1}, ... placeholders. Values are shell-quoted.
+// If a placeholder appears in a redirection context like "< ${0}" or "> ${1}"
+// the value is written to a temporary file and the placeholder is replaced
+// with the quoted path. Good for using bytes as stdin like Bun’s example.
+
+import std.process : executeShell;
+import std.exception : enforce;
+import std.string : indexOf, strip;
+import std.conv : to;
+import std.file : tempDir, remove, exists;
+import std.path : buildPath;
+import std.random : uniform;
+import std.stdio : File;
+import std.traits : isSomeString, isDynamicArray;
+import std.typecons : tuple;
+import core.time : Duration;
+
+version (Posix) import core.sys.posix.unistd : getpid;
+
+// Result value
+struct Outcome {
+    int code;
+    string stdout; // executeShell returns merged stdout+stderr
+    string stderr; // placeholder for parity, not populated by executeShell
+    Duration duration;
+
+    @property bool ok() const nothrow {
+        return code == 0;
+    }
+
+    Outcome expect(string msg = "command failed") {
+        enforce(ok, msg ~ "\n" ~ stdout);
+        return this;
+    }
+}
+
+// Minimal POSIX sh quoting of a single word
+private string shQuote(scope const string s) @safe pure nothrow {
+    string buf;
+    buf.reserve(s.length + 2);
+    buf ~= '\'';
+    foreach (c; s) {
+        if (c == '\'') {
+            // end quote, add '"'"', reopen quote
+            buf ~= "'\"'\"'";
+        } else {
+            buf ~= c;
+        }
+    }
+    buf ~= '\'';
+    return buf;
+}
+
+// Simple temp file path
+private string tempPath() {
+    static __gshared uint ctr;
+    ctr += 1;
+    auto r = uniform!uint;
+    version (Posix) {
+        auto pid = getpid();
+        return buildPath(tempDir, "dsh_" ~ to!string(pid) ~ "_" ~ to!string(
+                r) ~ "_" ~ to!string(ctr));
+    } else {
+        return buildPath(tempDir, "dsh_" ~ to!string(r) ~ "_" ~ to!string(ctr));
+    }
+}
+
+// Write bytes to a temp file and return its path
+private string writeTemp(const(ubyte)[] data) {
+    auto p = tempPath();
+    auto f = File(p, "wb");
+    scope (exit)
+        f.close();
+    f.rawWrite(data);
+    return p;
+}
+
+// Determine if ${...} at position phStartIndex is in a redirection context
+// Examples that return true: "< ${0}", "> ${1}", ">> ${2}", "2> ${3}", "2>> ${4}"
+private bool isRedirectionContext(scope const string script, size_t phStartIndex) @safe pure nothrow {
+    if (phStartIndex == 0)
+        return false;
+
+    size_t i = phStartIndex;
+    // scan left skipping spaces and tabs
+    while (i > 0) {
+        i -= 1;
+        auto ch = script[i];
+        if (ch == ' ' || ch == '\t')
+            continue;
+
+        // directly adjacent < or >
+        if (ch == '<' || ch == '>')
+            return true;
+
+        // handle >> by checking previous non-space
+        if (ch == '>' && i > 0 && script[i - 1] == '>')
+            return true;
+
+        // handle numeric fd like 2> or 3>>
+        if (ch >= '0' && ch <= '9') {
+            // check right side from this digit up to phStartIndex
+            size_t j = i + 1;
+            while (j < phStartIndex && (script[j] == ' ' || script[j] == '\t'))
+                j++;
+            if (j < phStartIndex && script[j] == '>')
+                return true;
+            return false;
+        }
+
+        // anything else breaks the pattern
+        return false;
+    }
+    return false;
+}
+
+// Expand script with numbered placeholders using args as views
+// Returns expanded script and list of temp files to remove
+private auto expandScript(scope const string script, const(void)[][] args) {
+    string result;
+    result.reserve(script.length + 32);
+    string[] temps;
+
+    size_t i = 0;
+    while (i < script.length) {
+        auto pos = script.indexOf("${", i);
+        if (pos == -1) {
+            result ~= script[i .. $];
+            break;
+        }
+
+        result ~= script[i .. pos];
+
+        auto close = script.indexOf('}', pos + 2);
+        enforce(close != -1, "Unclosed ${ in sh template");
+        auto numStr = script[pos + 2 .. close];
+
+        // parse N
+        int n = 0;
+        foreach (ch; numStr) {
+            enforce(ch >= '0' && ch <= '9',
+                    "Only numbered placeholders ${0}, ${1}, ... are supported");
+            n = n * 10 + (ch - '0');
+        }
+        enforce(n >= 0 && cast(size_t) n < args.length,
+                "Placeholder index out of range in sh template");
+
+        const(void)[] any = args[n];
+        const bool asFile = isRedirectionContext(script, pos);
+
+        string replacement;
+        if (asFile) {
+            const(ubyte)[] bytes;
+            // try as bytes
+            static if (__traits(compiles, cast(const(ubyte)[]) any)) {
+                bytes = cast(const(ubyte)[]) any;
+            } else {
+                // fallback assume string data
+                auto s = cast(const(char)[]) any;
+                bytes = cast(const(ubyte)[]) s;
+            }
+            auto p = writeTemp(bytes);
+            temps ~= p;
+            replacement = shQuote(p);
+        } else {
+            // treat as string word
+            string s;
+            static if (__traits(compiles, cast(string) any)) {
+                s = cast(string) any;
+            } else static if (__traits(compiles, cast(const(char)[]) any)) {
+                auto cs = cast(const(char)[]) any;
+                s = cs.idup;
+            } else {
+                // last resort to string
+                s = to!string(any);
+            }
+            replacement = shQuote(s);
+        }
+
+        result ~= replacement;
+        i = close + 1;
+    }
+
+    return tuple(result, temps);
+}
+
+// Public template: sh!"...". Call it with values for ${0}, ${1}, ...
+template sh(string SCRIPT) {
+    auto sh(Args...)(Args args) {
+        import std.datetime.stopwatch : StopWatch, AutoStart;
+
+        // Pack arguments into generic views
+        const(void)[][] views;
+        views.length = args.length;
+
+        foreach (idx, a; args) {
+            static if (isSomeString!(typeof(a))) {
+                views[idx] = cast(const(void)[]) a;
+            } else static if (isDynamicArray!(typeof(a)) && is(typeof(a[0]) == ubyte)) {
+                views[idx] = cast(const(void)[]) a;
+            } else {
+                // convert others to string
+                auto s = to!string(a);
+                views[idx] = cast(const(void)[]) s;
+            }
+        }
+
+        auto ex = expandScript(SCRIPT, views);
+        auto script = ex[0];
+        auto temps = ex[1];
+
+        auto sw = StopWatch(AutoStart.yes);
+        auto r = executeShell(script);
+        auto result = Outcome(r.status, r.output, "", sw.peek);
+
+        // cleanup temp files
+        foreach (p; temps) {
+            if (exists(p)) {
+                scope (failure) {
+                }
+                remove(p);
+            }
+        }
+
+        return result;
+    }
+}
+
+/+ ------------------
+// Example usage:
+
+unittest {
+    import std.stdio : writeln;
+
+    auto name = "Wobbat";
+    auto a = sh!`printf '%s\n' ${0} | tr a-z A-Z`(name).expect;
+    assert(a.stdout.strip == "WOBBAT");
+
+    auto response = cast(const(ubyte)[])"hello\nworld\n";
+    auto b = sh!`cat < ${0} | wc -l`(response).expect;
+    assert(b.stdout.strip == "2");
+}
+------------------ +/

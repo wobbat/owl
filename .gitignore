@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/owl
+owl.so
+owl.dylib
+owl.dll
+owl.a
+owl.lib
+owl-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst

@@ -1,0 +1,8 @@
+name "owl"
+description "Config driven package manager for arch"
+authors "wobbat"
+copyright "Copyright © 2025, wobbat"
+license "proprietary"
+sourcePaths "src"
+mainSourceFile "src/main.d"
+
