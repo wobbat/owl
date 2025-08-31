@@ -81,11 +81,20 @@ int runCommand(const CommandCall cc)
 
 // Command implementations
 import terminal.colors;
-import terminal.commands;
+import terminal.commands.apply;
+import terminal.commands.upgrade;
+import terminal.commands.package_mgmt;
+import terminal.commands.config_edit;
 import config.analysis;
 import config.loader;
+import utils.common : HostDetection;
 import std.process : environment;
 import std.path : buildPath;
+
+string resolveHostname(const CommandCall cc)
+{
+    return HostDetection.detect();
+}
 
 int runCheck(const CommandCall cc)
 {
