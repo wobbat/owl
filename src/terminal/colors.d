@@ -77,6 +77,8 @@ enum
     BgMagenta = "\x1b[48;2;140;104;106m",
     BgTeal = "\x1b[48;2;77;182;172m",
     BgBlue = "\x1b[48;2;104;119;140m",
+    BgOrange = "\x1b[48;2;180;120;80m",
+    BgGreen = "\x1b[48;2;100;140;90m",
     BgWhite = "\x1b[48;2;255;255;255m",
 
     FgBlack = "\x1b[38;2;0;0;0m",
@@ -205,6 +207,16 @@ string tealBadge(string text)
 string blueBadge(string text)
 {
     return badge(text, BgBlue, FgWhite);
+}
+
+string orangeBadge(string text)
+{
+    return badge(text, BgOrange, FgWhite);
+}
+
+string greenBadge(string text)
+{
+    return badge(text, BgGreen, FgWhite);
 }
 
 // Bracket helpers for common patterns

@@ -13,8 +13,6 @@ enum OwlPaths : string
 
     // State directory and files
     StateDir = "~/.owl/.state",
-    ManagedState = "~/.owl/.state/managed.json",
-    GlobalEnvState = "~/.owl/.state/global-env.json",
     UntrackedState = "~/.owl/.state/untracked.json",
     HiddenState = "~/.owl/.state/hidden.txt",
 
@@ -41,16 +39,6 @@ string owlMainConfig()
 string owlStateDir()
 {
     return expandTilde(OwlPaths.StateDir);
-}
-
-string owlManagedState()
-{
-    return expandTilde(OwlPaths.ManagedState);
-}
-
-string owlGlobalEnvState()
-{
-    return expandTilde(OwlPaths.GlobalEnvState);
 }
 
 string owlUntrackedState()

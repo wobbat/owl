@@ -35,21 +35,9 @@ struct ApplyContext
 
 ApplyContext initializeApplyContext(bool dryRun, CommandOptions options)
 {
-    string host = currentHost();
+    string host = HostDetection.detect();
     auto analysis = analyzeConfiguration(host);
     bool aurAvailable = !options.noAur;
-
-    auto ctx = SpinnerContext(options);
-    auto plan = withSpinner("Analyzing package status...", ctx, () {
-        return planPackageActions(analysis.uniquePackages);
-    });
-
-    string[] toInstall = plan.filter!(p => p.status == PackageActionStatus.install)
-        .map!(p => p.name)
-        .array;
-    string[] toRemove = plan.filter!(p => p.status == PackageActionStatus.remove)
-        .map!(p => p.name)
-        .array;
 
     int dotPkgCount = 0;
     foreach (entry; analysis.conf.entries)
@@ -58,12 +46,27 @@ ApplyContext initializeApplyContext(bool dryRun, CommandOptions options)
             dotPkgCount++;
     }
 
-    return ApplyContext(dryRun, options, analysis, aurAvailable, toInstall, toRemove, dotPkgCount);
+    // Initialize with empty arrays - will be filled in showAnalysisPhase
+    return ApplyContext(dryRun, options, analysis, aurAvailable, [], [], dotPkgCount);
 }
 
-void showAnalysisPhase(ApplyContext ctx)
+void showAnalysisPhase(ref ApplyContext ctx)
 {
     sectionHeader("Analyze", "blue");
+
+    // Show the analysis spinner here for proper order
+    auto spinnerCtx = SpinnerContext(ctx.options);
+    auto plan = withSpinner("Analyzing package status...", spinnerCtx, () {
+        return planPackageActions(ctx.analysis.uniquePackages);
+    });
+
+    // Update the context with the calculated plan
+    ctx.toInstall = plan.filter!(p => p.status == PackageActionStatus.install)
+        .map!(p => p.name)
+        .array;
+    ctx.toRemove = plan.filter!(p => p.status == PackageActionStatus.remove)
+        .map!(p => p.name)
+        .array;
 
     if (ctx.options.debugMode)
     {
@@ -127,7 +130,7 @@ int executeApply(ApplyContext ctx)
 
 void handlePackageManagement(ApplyContext ctx)
 {
-    sectionHeader("Pkg management", "yellow");
+    sectionHeader("Pkg management", "green");
 
     auto spinnerCtx = SpinnerContext(ctx.options);
     auto allOutdated = withSpinner("Checking for package upgrades...", spinnerCtx, () {
@@ -391,7 +394,7 @@ void handleEnvironment(ApplyContext ctx)
 {
     if (ctx.analysis.allEnvs.length > 0)
     {
-        sectionHeader("Environment", "blue");
+        sectionHeader("Environment", "orange");
 
         import systems.env;
 
@@ -525,7 +528,7 @@ void showEnvironmentDryRun(ApplyContext ctx)
 {
     if (ctx.analysis.allEnvs.length > 0 || ctx.analysis.conf.globalEnvs.length > 0)
     {
-        sectionHeader("Environment", "blue");
+        sectionHeader("Environment", "orange");
         if (ctx.analysis.allEnvs.length > 0)
         {
             writeln("Environment variables to set:");

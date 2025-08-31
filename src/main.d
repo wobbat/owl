@@ -1,10 +1,6 @@
 module main;
 
-import std.stdio;
-import std.stdio : writeln;
-import std.string : strip;
-import terminal.cli; // single entry point
-import utils.sh;
+import terminal.cli;
 
 int main(string[] args)
 {

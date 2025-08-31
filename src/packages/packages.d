@@ -35,9 +35,8 @@ PackageAction[] planPackageActions(string[] desired)
         }
     }
 
-    // TODO: Implement managed packages tracking
-    // Only propose removals for packages we previously managed
-    // For now, we'll skip removals until state management is implemented
+    // Package removal is currently not implemented
+    // Only handle installations for now
 
     return actions;
 }
@@ -49,8 +48,7 @@ void removeUnmanagedPackages(string[] names, bool quiet = true)
 
 void updateManagedPackages(string[] names)
 {
-    // TODO: Persist the set of managed packages after a successful apply
-    // This will require implementing state management
+    // Currently not implemented - packages are not tracked as managed
 }
 
 /// Apply system package upgrades (repo packages)

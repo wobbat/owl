@@ -36,11 +36,6 @@ import utils.sh;
 import packages.state;
 import packages.pkgbuild;
 
-string currentHost()
-{
-    return HostDetection.detect();
-}
-
 struct ConfigAnalysis
 {
     string host;
@@ -555,7 +550,7 @@ DotfilePath findDotfilePath(string target)
     }
 
     // Load config to check mappings
-    string host = currentHost();
+    string host = HostDetection.detect();
     auto conf = loadConfigChain(owlConfigRoot(), host);
 
     // Check config mappings first
@@ -660,7 +655,7 @@ int trackPackages(const string[] args, CommandOptions options)
 {
     import utils.selection;
 
-    string host = currentHost();
+    string host = HostDetection.detect();
     auto candidates = computeTrackCandidates(host);
 
     if (candidates.length == 0)
@@ -777,7 +772,7 @@ int hidePackages(const string[] args, CommandOptions options, const bool[string]
 
     // Normal hide functionality
     sectionHeader("Hide Packages", "blue");
-    string host = currentHost();
+    string host = HostDetection.detect();
     auto candidates = computeTrackCandidates(host);
 
     if (candidates.length == 0)
@@ -824,7 +819,7 @@ int runDotsCommand(const CommandCall cc)
 int dotsCheck(CommandOptions options)
 {
     // Load configuration and filter entries with configs
-    string host = currentHost();
+    string host = HostDetection.detect();
     auto conf = loadConfigChain(owlConfigRoot(), host);
     ConfigEntry[] entriesWithConfigs;
 

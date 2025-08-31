@@ -33,22 +33,16 @@ int runCommand(const CommandCall cc)
 {
     // Aliases
     string cmd = cc.command;
-    if (cmd == "dr" || cmd == "dry-run")
+    if (cmd == "dr")
         cmd = "dry-run";
-    if (cmd == "d" || cmd == "dots")
+    if (cmd == "d")
         cmd = "dots";
-    if (cmd == "up" || cmd == "upgrade")
+    if (cmd == "up")
         cmd = "upgrade";
-    if (cmd == "s" || cmd == "search")
-        cmd = "search";
-    if (cmd == "ce" || cmd == "configedit")
+    if (cmd == "ce")
         cmd = "configedit";
-    if (cmd == "de" || cmd == "dotedit" || cmd == "dotsedit")
+    if (cmd == "de")
         cmd = "dotedit";
-    if (cmd == "help" || cmd == "--help" || cmd == "-h")
-        cmd = "help";
-    if (cmd == "version" || cmd == "--version" || cmd == "-v")
-        cmd = "version";
 
     switch (cmd)
     {
@@ -64,18 +58,12 @@ int runCommand(const CommandCall cc)
         return runHide(cc);
     case "add":
         return runAdd(cc);
-    case "search":
-        return runSearch(cc);
     case "configedit":
         return runConfigEdit(cc);
     case "dotedit":
         return runDotEdit(cc);
     case "upgrade":
         return runUpgrade(cc);
-    case "uninstall":
-        return runUninstall(cc);
-    case "gendb":
-        return runGendb(cc);
     case "check":
         return runCheck(cc);
     case "help":
@@ -91,29 +79,24 @@ int runCommand(const CommandCall cc)
     }
 }
 
-// Example handlers
+// Command implementations
 import terminal.colors;
 import terminal.commands;
+import config.analysis;
+import config.loader;
+import std.process : environment;
+import std.path : buildPath;
 
 int runCheck(const CommandCall cc)
 {
-    import std.process : environment;
-    import std.path : buildPath;
-    import config.analysis;
-
     string home = environment["HOME"];
     string configDir = buildPath(home, ".owl");
     string hostname = resolveHostname(cc);
 
     auto analysis = analyzeConfigChain(hostname, configDir);
     displayConfigAnalysis(analysis);
-
     return 0;
 }
-
-import config.loader;
-import std.string : join, startsWith;
-import std.algorithm : filter;
 
 int runApply(const CommandCall cc)
 {
@@ -135,8 +118,6 @@ int runDryRun(const CommandCall cc)
 
 int runDots(const CommandCall cc)
 {
-    import terminal.commands : runDotsCommand;
-
     return runDotsCommand(cc);
 }
 
@@ -168,26 +149,4 @@ int runDotEdit(const CommandCall cc)
 int runUpgrade(const CommandCall cc)
 {
     return runUpgradeCommand(cc);
-}
-
-int runSearch(const CommandCall cc)
-{
-    writeln(bold(cyan("search: Search for packages in repositories and AUR")));
-    return 0;
-}
-
-int runUninstall(const CommandCall cc)
-{
-    writeln(bold(cyan("uninstall: Remove all managed packages and configs")));
-    writeln(bold(cyan("Flags: ")), cc.flags);
-    writeln(bold(cyan("Args: ")), cc.arguments);
-    return 0;
-}
-
-int runGendb(const CommandCall cc)
-{
-    writeln(bold(cyan("gendb: Generate VCS database for development packages")));
-    writeln(bold(cyan("Flags: ")), cc.flags);
-    writeln(bold(cyan("Args: ")), cc.arguments);
-    return 0;
 }

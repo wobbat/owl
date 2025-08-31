@@ -14,3 +14,17 @@ owl-test-*
 *.o
 *.obj
 *.lst
+
+# Build artifacts
+*.tar.gz
+owl-*/
+
+# Test installation
+test-install/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

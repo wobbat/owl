@@ -36,6 +36,12 @@ void sectionHeader(string section, string color = "blue")
     case "teal":
         badgeText = tealBadge(section);
         break;
+    case "orange":
+        badgeText = orangeBadge(section);
+        break;
+    case "green":
+        badgeText = greenBadge(section);
+        break;
     default:
         badgeText = blueBadge(section);
         break;
@@ -128,7 +134,7 @@ void showAllPackagesUpgraded()
 // OK message with symbol
 void ok(string msg)
 {
-    writeln(symbolOk() ~ " " ~ msg);
+    writeln("  " ~ symbolOk() ~ " " ~ msg);
 }
 
 // Spinner class with threaded animation
@@ -458,12 +464,9 @@ void printTopLevelHelp()
     ui.row("  track", "Track explicitly-installed packages into Owl configs");
     ui.row("  hide", "Hide packages from track suggestions");
     ui.row("  add", "Search for and add packages to configuration files");
-    ui.row("  search, s", "Search for packages in repositories and AUR");
     ui.row("  configedit, ce", "Edit configuration files with your preferred editor");
-    ui.row("  dotedit, de, dotsedit", "Edit dotfiles with your preferred editor");
+    ui.row("  dotedit, de", "Edit dotfiles with your preferred editor");
     ui.row("  upgrade, up", "Upgrade all packages to latest versions");
-    ui.row("  uninstall", "Remove all managed packages and configs");
-    ui.row("  gendb", "Generate VCS database for development packages");
     ui.row("  check", "Print parsed config chain for debugging");
     ui.row("  help, --help, -h", "Show this help message");
     ui.row("  version, --version, -v", "Show version information");
