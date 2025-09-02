@@ -9,7 +9,8 @@ import terminal.args;
 import terminal.options;
 import terminal.ui;
 import terminal.colors;
-import terminal.commands.apply : analyzeConfiguration, ConfigAnalysis, applySystemUpgrade, applyAurUpgrades, applyVcsUpgrades;
+import terminal.commands.apply : analyzeConfiguration, ConfigAnalysis,
+    applySystemUpgrade, applyAurUpgrades, applyVcsUpgrades;
 import utils.common;
 import packages.packages;
 import packages.pacman;
