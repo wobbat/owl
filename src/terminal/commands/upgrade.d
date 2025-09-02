@@ -49,39 +49,6 @@ int runUpgradeCommand(const CommandCall cc)
 
     sectionHeader("Upgrade", "yellow");
 
-    // Get all outdated packages 
-    auto spinner = newSpinner("Checking for updates...", !noSpinner);
-    auto allOutdated = getOutdatedPackages(!noAur, dev, null);
-    spinner.stop("Found " ~ format("%d", allOutdated.length) ~ " package(s) to upgrade");
-
-    if (allOutdated.length == 0)
-    {
-        ok("All packages are up to date");
-        return 0;
-    }
-
-    // Show upgrade plan
-    writeln("Packages to upgrade:");
-    foreach (pkg; allOutdated)
-    {
-        if (pkg.source == "aur")
-        {
-            writeln(upgradePackageLine(pkg.name, "aur"));
-        }
-        else
-        {
-            string repo = getPackageRepository(pkg.name);
-            writeln(upgradePackageLine(pkg.name, repo));
-        }
-    }
-    writeln("");
-
-    // Separate repo and AUR packages
-    auto repoOutdated = allOutdated.filter!(p => p.source != "aur").array;
-    auto aurOutdated = allOutdated.filter!(p => p.source == "aur").array;
-
-    bool success = true;
-
     // Create options structure for existing functions
     CommandOptions options;
     options.noAur = noAur;
@@ -90,28 +57,38 @@ int runUpgradeCommand(const CommandCall cc)
     options.verbose = verbose;
     options.noSpinner = noSpinner;
 
-    // Upgrade repo packages first
-    if (repoOutdated.length > 0)
-    {
-        import terminal.commands.apply : applySystemUpgrade;
-        applySystemUpgrade(options, false);
-    }
+    // Upgrade all repo packages (no filtering by managed status)
+    import terminal.commands.apply : applySystemUpgrade;
 
-    // Upgrade AUR packages
-    if (!noAur && aurOutdated.length > 0)
-    {
-        import terminal.commands.apply : applyAurUpgrades;
-        applyAurUpgrades(options, aurOutdated);
-    }
+    applySystemUpgrade(options, false);
 
-    // Upgrade VCS packages if requested
-    if (!noAur && dev)
+    // Upgrade AUR packages if not disabled
+    if (!noAur)
     {
-        import terminal.commands.apply : applyVcsUpgrades;
-        applyVcsUpgrades(options);
+        // Get all outdated AUR packages
+        auto spinner = newSpinner("Checking AUR for updates...", !noSpinner);
+        auto allOutdated = getOutdatedPackages(true, dev, null);
+        auto aurOutdated = allOutdated.filter!(p => p.source == "aur").array;
+        spinner.stop("Found " ~ format("%d", aurOutdated.length) ~ " AUR package(s) to upgrade");
+
+        if (aurOutdated.length > 0)
+        {
+            import terminal.commands.apply : applyAurUpgrades;
+
+            applyAurUpgrades(options, aurOutdated);
+        }
+
+        // Upgrade VCS packages if requested
+        if (dev)
+        {
+            import terminal.commands.apply : applyVcsUpgrades;
+
+            applyVcsUpgrades(options);
+        }
     }
 
     import terminal.commands.apply : showAllPackagesUpgraded;
+
     showAllPackagesUpgraded();
     return 0;
 }

@@ -330,5 +330,6 @@ int runDotsCommand(const CommandCall cc)
 {
     auto opts = parseCommandOptions(cc.flags, cc.arguments);
     import terminal.commands.apply : dotsCheck;
+
     return dotsCheck(opts);
 }
