@@ -81,8 +81,6 @@ bool runSetupScripts(string[] scripts)
     if (scripts.length == 0)
         return true;
 
-    sectionHeader("Setup", "green");
-
     bool allSuccess = true;
     foreach (script; scripts)
     {

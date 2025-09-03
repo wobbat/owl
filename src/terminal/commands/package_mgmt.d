@@ -1,40 +1,6 @@
 module terminal.commands.package_mgmt;
 
-import std.algorithm;
-import std.array;
-import std.process;
-import std.stdio;
-import std.string;
-import std.path;
-import std.file;
-import std.format;
-import std.conv;
-import std.algorithm.sorting;
-
-import terminal.args;
-import terminal.options;
-import terminal.ui;
-import terminal.colors;
-import terminal.prompt;
-import terminal.apply;
-import config.loader;
-import config.parser;
-import config.paths;
-import utils.process;
-import utils.common;
-import utils.selection;
-import config.write;
-import packages.packages;
-import packages.pacman;
-import packages.aur;
-import packages.types;
-import systems.dotfiles;
-import systems.env;
-import systems.setup;
-import systems.services;
-import utils.sh;
-import packages.state;
-import packages.pkgbuild;
+import terminal.commands.common_imports;
 
 int runAddCommand(const CommandCall cc)
 {
@@ -50,7 +16,7 @@ int addPackage(const string[] searchTerms, CommandOptions options)
         return 1;
     }
 
-    auto results = searchAny(cast(string[]) searchTerms, options.source);
+    auto results = searchAny(cast(string[]) searchTerms, options.source, options.paru);
 
     // Display results exactly like nim version
     writeln("\n" ~ bold("Found") ~ " " ~ format("%d", results.length) ~ " package(s):\n");
@@ -61,23 +27,45 @@ int addPackage(const string[] searchTerms, CommandOptions options)
         return 1;
     }
 
-    // Use countdown numbering (most relevant at bottom)
-    foreach (ulong num; 1 .. results.length + 1)
+    // If paru was requested, preserve the order paru returned but invert numbering
+    if (options.paru)
     {
-        ulong idx = results.length - num;
-        auto result = results[idx];
+        foreach (size_t i; 0 .. results.length)
+        {
+            auto result = results[i];
 
-        string numStr = numberBrackets(cast(int) num);
-        string name = highlight(result.name);
-        string versionStr = successText(result.ver);
-        string tag = result.source == PackageSource.aur ? brackets("aur",
-                Warning) : brackets(result.repo, Repository);
-        string status = result.installed ? " " ~ successText("installed") : "";
-        string desc = result.description.length > 0 ? " - " ~ description(result.description) : "";
+            string numStr = numberBrackets(cast(int)(results.length - i));
+            string name = highlight(result.name);
+            string versionStr = successText(result.ver);
+            string tag = result.source == PackageSource.aur ? brackets("aur",
+                    Warning) : brackets(result.repo, Repository);
+            string status = result.installed ? " " ~ successText("installed") : "";
+            string desc = result.description.length > 0 ? " - " ~ description(
+                    result.description) : "";
 
-        writeln(numStr ~ " " ~ name ~ " " ~ versionStr ~ " " ~ tag ~ status ~ desc);
+            writeln(numStr ~ " " ~ name ~ " " ~ versionStr ~ " " ~ tag ~ status ~ desc);
+        }
+        writeln("");
     }
-    writeln("");
+    else
+    {
+        foreach (size_t i; 0 .. results.length)
+        {
+            auto result = results[i];
+
+            string numStr = numberBrackets(cast(int)(i + 1));
+            string name = highlight(result.name);
+            string versionStr = successText(result.ver);
+            string tag = result.source == PackageSource.aur ? brackets("aur",
+                    Warning) : brackets(result.repo, Repository);
+            string status = result.installed ? " " ~ successText("installed") : "";
+            string desc = result.description.length > 0 ? " - " ~ description(
+                    result.description) : "";
+
+            writeln(numStr ~ " " ~ name ~ " " ~ versionStr ~ " " ~ tag ~ status ~ desc);
+        }
+        writeln("");
+    }
 
     if (options.dryRun)
     {
@@ -93,8 +81,8 @@ int addPackage(const string[] searchTerms, CommandOptions options)
         return 1;
     }
 
-    // Fix selection mapping: reverse the index to match display order
-    auto chosen = results[results.length - selNum];
+    // Map selection to result depending on display order
+    auto chosen = options.paru ? results[results.length - selNum] : results[selNum - 1];
     return addPackageToConfig(chosen, options);
 }
 
@@ -119,13 +107,11 @@ int addPackageToConfig(SearchResult sel, CommandOptions options)
         {
             writeln("\n" ~ bold("Select a configuration file:") ~ "\n");
 
-            // Show countdown numbering (most relevant at bottom)
-            foreach (ulong num; 1 .. files.length + 1)
+            foreach (size_t i; 0 .. files.length)
             {
-                ulong idx = files.length - num;
-                string file = files[idx];
+                string file = files[i];
                 string friendly = file.replace("~/", "");
-                string numberPart = numberBrackets(cast(int) num);
+                string numberPart = numberBrackets(cast(int)(i + 1));
                 string fileName = packageName(friendly.canFind('/')
                         ? friendly.split('/')[$ - 1] : friendly);
                 string pathPart = "(" ~ highlight(friendly) ~ ")";
@@ -142,8 +128,7 @@ int addPackageToConfig(SearchResult sel, CommandOptions options)
                 errorOutput("Invalid selection");
                 return 1;
             }
-            // Fix selection mapping: reverse the index to match display order
-            targetFile = files[files.length - pick];
+            targetFile = files[pick - 1];
         }
     }
 
@@ -300,12 +285,10 @@ int hidePackages(const string[] args, CommandOptions options, const bool[string]
 
     writeln("\n" ~ bold("Candidate packages (hide to ignore in track):") ~ "\n");
 
-    // Display candidates in countdown order (most relevant at bottom)
-    foreach (ulong i; 1 .. candidates.length + 1)
+    foreach (size_t i; 0 .. candidates.length)
     {
-        ulong idx = candidates.length - i;
-        string pkg = candidates[idx];
-        string numberPart = successText("[") ~ to!string(i) ~ successText("]");
+        string pkg = candidates[i];
+        string numberPart = successText("[") ~ to!string(i + 1) ~ successText("]");
         writeln(numberPart ~ " " ~ packageName(pkg));
     }
     writeln("");
@@ -316,8 +299,7 @@ int hidePackages(const string[] args, CommandOptions options, const bool[string]
         return 0;
     }
 
-    // Fix selection mapping: reverse the index to match display order
-    string selected = candidates[candidates.length - selection];
+    string selected = candidates[selection - 1];
     addToUntracked(selected);
     import terminal.ui : success;
 

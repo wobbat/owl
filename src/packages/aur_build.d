@@ -181,8 +181,28 @@ bool checkAurStatus()
 
 /// Build and install AUR package with error handling and optional diff
 bool buildAndInstallAurPackage(string name, ProgressCallback progress = null,
-        bool showDiff = false, bool interactive = true)
+        bool showDiff = false, bool interactive = true, bool useParu = false)
 {
+    // Avoid circular dependency: don't use paru to install paru
+    if (name == "paru") {
+        useParu = false;
+    }
+
+    // Check if paru should be used and is available
+    bool paruAvailable = false;
+    if (useParu)
+    {
+        import packages.pacman : ensureParuAvailable;
+        paruAvailable = ensureParuAvailable();
+    }
+
+    // If paru is available and requested, use it for the entire process
+    if (paruAvailable)
+    {
+        return buildAndInstallAurPackageWithParu(name, progress, showDiff, interactive);
+    }
+
+    // Fall back to manual process
     string tmpDir = tempDir() ~ "/aur-" ~ name;
     bool success = false;
 
@@ -259,4 +279,45 @@ bool buildAndInstallAurPackage(string name, ProgressCallback progress = null,
     }
 
     return success;
+}
+
+/// Build and install AUR package using paru
+bool buildAndInstallAurPackageWithParu(string name,
+        ProgressCallback progress = null, bool showDiff = false, bool interactive = true)
+{
+    try
+    {
+        string[] args = ["paru", "-S", name];
+
+        // Add flags based on options
+        if (!interactive)
+        {
+            args ~= "--noconfirm";
+        }
+
+        if (progress)
+            progress("Installing " ~ name ~ " with paru...");
+
+        // Use pipeProcess to suppress output but allow progress callbacks
+        auto pipes = pipeProcess(args, Redirect.stdout | Redirect.stderr);
+
+        scope (exit)
+        {
+            // Always clean up the process
+            if (!pipes.pid.tryWait().terminated)
+            {
+                import core.sys.posix.signal;
+
+                kill(pipes.pid.processID, SIGTERM);
+            }
+        }
+
+        // Simple wait for completion
+        auto result = wait(pipes.pid);
+        return result == 0;
+    }
+    catch (Exception e)
+    {
+        return false;
+    }
 }

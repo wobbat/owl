@@ -9,6 +9,10 @@ enum APP_VERSION = "owl 0.1.0";
 // Main entrypoint
 int run(string[] args)
 {
+    // Check for paru availability before any command execution
+    import packages.pacman : ensureParuAvailable;
+    ensureParuAvailable();
+
     // Top-level flags
     if (hasTopFlag(args, "help"))
     {
@@ -22,50 +26,54 @@ int run(string[] args)
     }
 
     // Parse command/flags/args
-    auto cc = parseCommandCall(args);
+    auto commandCall = parseCommandCall(args);
+
+    // Parse options to check if paru is requested
+    import terminal.options : parseCommandOptions;
+    auto opts = parseCommandOptions(commandCall.flags, commandCall.arguments);
 
     // Dispatch
-    return runCommand(cc);
+    return runCommand(commandCall);
 }
 
 // Generic dispatcher
-int runCommand(const CommandCall cc)
+int runCommand(const CommandCall commandCall)
 {
     // Aliases
-    string cmd = cc.command;
-    if (cmd == "dr")
-        cmd = "dry-run";
-    if (cmd == "d")
-        cmd = "dots";
-    if (cmd == "up")
-        cmd = "upgrade";
-    if (cmd == "ce")
-        cmd = "configedit";
-    if (cmd == "de")
-        cmd = "dotedit";
+    string command = commandCall.command;
+    if (command == "dr")
+        command = "dry-run";
+    if (command == "d")
+        command = "dots";
+    if (command == "up")
+        command = "upgrade";
+    if (command == "ce")
+        command = "configedit";
+    if (command == "de")
+        command = "dotedit";
 
-    switch (cmd)
+    switch (command)
     {
     case "apply":
-        return runApply(cc);
+        return runApplyCommand(commandCall);
     case "dry-run":
-        return runDryRun(cc);
+        return runDryRun(commandCall);
     case "dots":
-        return runDots(cc);
+        return runDotsCommand(commandCall);
     case "track":
-        return runTrack(cc);
+        return runTrackCommand(commandCall);
     case "hide":
-        return runHide(cc);
+        return runHideCommand(commandCall);
     case "add":
-        return runAdd(cc);
+        return runAddCommand(commandCall);
     case "configedit":
-        return runConfigEdit(cc);
+        return runConfigEditCommand(commandCall);
     case "dotedit":
-        return runDotEdit(cc);
+        return runDotEditCommand(commandCall);
     case "upgrade":
-        return runUpgrade(cc);
+        return runUpgradeCommand(commandCall);
     case "check":
-        return runCheck(cc);
+        return runCheck(commandCall);
     case "help":
         terminal.ui.printTopLevelHelp();
         return 0;
@@ -73,7 +81,7 @@ int runCommand(const CommandCall cc)
         writeln(APP_VERSION);
         return 0;
     default:
-        terminal.ui.printUnknownCommand(cc.command);
+        terminal.ui.printUnknownCommand(commandCall.command);
         terminal.ui.printTopLevelHelp();
         return 2;
     }
@@ -91,71 +99,31 @@ import utils.common : HostDetection;
 import std.process : environment;
 import std.path : buildPath;
 
-string resolveHostname(const CommandCall cc)
+string resolveHostname(const CommandCall commandCall)
 {
     return HostDetection.detect();
 }
 
-int runCheck(const CommandCall cc)
+int runCheck(const CommandCall commandCall)
 {
     string home = environment["HOME"];
     string configDir = buildPath(home, ".owl");
-    string hostname = resolveHostname(cc);
+    string hostname = resolveHostname(commandCall);
 
     auto analysis = analyzeConfigChain(hostname, configDir);
     displayConfigAnalysis(analysis);
     return 0;
 }
 
-int runApply(const CommandCall cc)
+int runDryRun(const CommandCall commandCall)
 {
-    return runApplyCommand(cc);
-}
-
-int runDryRun(const CommandCall cc)
-{
-    CommandCall modifiedCc;
-    modifiedCc.command = cc.command;
-    modifiedCc.arguments = cc.arguments.dup;
-    foreach (key, value; cc.flags)
+    CommandCall modifiedCommand;
+    modifiedCommand.command = commandCall.command;
+    modifiedCommand.arguments = commandCall.arguments.dup;
+    foreach (key, value; commandCall.flags)
     {
-        modifiedCc.flags[key] = value;
+        modifiedCommand.flags[key] = value;
     }
-    modifiedCc.flags["dry-run"] = true;
-    return runApplyCommand(modifiedCc);
-}
-
-int runDots(const CommandCall cc)
-{
-    return runDotsCommand(cc);
-}
-
-int runTrack(const CommandCall cc)
-{
-    return runTrackCommand(cc);
-}
-
-int runHide(const CommandCall cc)
-{
-    return runHideCommand(cc);
-}
-
-int runAdd(const CommandCall cc)
-{
-    return runAddCommand(cc);
-}
-
-int runConfigEdit(const CommandCall cc)
-{
-    return runConfigEditCommand(cc);
-}
-
-int runDotEdit(const CommandCall cc)
-{
-    return runDotEditCommand(cc);
-}
-
-int runUpgrade(const CommandCall cc)
-{
-    return runUpgradeCommand(cc);
+    modifiedCommand.flags["dry-run"] = true;
+    return runApplyCommand(modifiedCommand);
 }

@@ -10,13 +10,6 @@ import packages.types;
 import packages.pacman;
 import packages.aur;
 
-/// Check if a package is a VCS package (ends with -git, -hg, etc.)
-bool isVCSPackage(string name)
-{
-    return name.endsWith("-git") || name.endsWith("-hg")
-        || name.endsWith("-svn") || name.endsWith("-bzr");
-}
-
 import packages.aur_build;
 
 PackageAction[] planPackageActions(string[] desired)
@@ -41,18 +34,13 @@ PackageAction[] planPackageActions(string[] desired)
     return actions;
 }
 
-void removeUnmanagedPackages(string[] names, bool quiet = true)
+void removeUnmanagedPackages(string[] names, bool quiet = true, bool useParu = false)
 {
-    removePackages(names, recursive: true, assumeYes: quiet);
-}
-
-void updateManagedPackages(string[] names)
-{
-    // Currently not implemented - packages are not tracked as managed
+    removePackages(names, recursive: true, assumeYes: quiet, progress: null, useParu: useParu);
 }
 
 /// Apply system package upgrades (repo packages)
-bool applySystemUpgrade(bool sync = false, ProgressCallback progress = null)
+bool applySystemUpgrade(bool sync = false, ProgressCallback progress = null, bool useParu = false)
 {
     try
     {
@@ -60,13 +48,13 @@ bool applySystemUpgrade(bool sync = false, ProgressCallback progress = null)
         {
             if (progress)
                 progress("Syncing package databases...");
-            syncDatabases(progress);
+            syncDatabases(progress, null, useParu);
         }
 
         if (progress)
             progress("Upgrading system packages...");
 
-        return upgradeSystem(progress);
+        return upgradeSystem(progress, null, useParu);
     }
     catch (Exception e)
     {
@@ -75,12 +63,13 @@ bool applySystemUpgrade(bool sync = false, ProgressCallback progress = null)
 }
 
 /// Apply AUR package upgrades
-bool applyAurUpgrades(OutdatedPackage[] aurPkgs, ProgressCallback progress = null)
+bool applyAurUpgrades(OutdatedPackage[] aurPkgs, ProgressCallback progress = null,
+        bool useParu = false)
 {
     if (aurPkgs.length == 0)
         return true;
 
-    bool allSuccessful = true;
+    bool success = true;
 
     foreach (pkg; aurPkgs)
     {
@@ -89,22 +78,22 @@ bool applyAurUpgrades(OutdatedPackage[] aurPkgs, ProgressCallback progress = nul
             if (progress)
                 progress("Upgrading AUR package: " ~ pkg.name);
 
-            if (!buildAndInstallAurPackage(pkg.name, progress))
+            if (!buildAndInstallAurPackage(pkg.name, progress, false, true, useParu))
             {
-                allSuccessful = false;
+                success = false;
             }
         }
         catch (Exception e)
         {
-            allSuccessful = false;
+            success = false;
         }
     }
 
-    return allSuccessful;
+    return success;
 }
 
 /// Apply VCS package upgrades (git packages, etc.)
-bool applyVcsUpgrades(ProgressCallback progress = null)
+bool applyVcsUpgrades(ProgressCallback progress = null, bool useParu = false)
 {
     try
     {
@@ -114,8 +103,7 @@ bool applyVcsUpgrades(ProgressCallback progress = null)
         foreach (pkg; foreignPkgs)
         {
             string name = pkg[0];
-            if (name.endsWith("-git") || name.endsWith("-hg")
-                    || name.endsWith("-svn") || name.endsWith("-bzr"))
+            if (isVCSPackage(name))
             {
                 vcsPkgs ~= name;
             }
@@ -124,7 +112,7 @@ bool applyVcsUpgrades(ProgressCallback progress = null)
         if (vcsPkgs.length == 0)
             return true;
 
-        bool allSuccessful = true;
+        bool success = true;
 
         foreach (pkg; vcsPkgs)
         {
@@ -133,18 +121,18 @@ bool applyVcsUpgrades(ProgressCallback progress = null)
                 if (progress)
                     progress("Upgrading VCS package: " ~ pkg);
 
-                if (!buildAndInstallAurPackage(pkg, progress))
+                if (!buildAndInstallAurPackage(pkg, progress, false, true, useParu))
                 {
-                    allSuccessful = false;
+                    success = false;
                 }
             }
             catch (Exception e)
             {
-                allSuccessful = false;
+                success = false;
             }
         }
 
-        return allSuccessful;
+        return success;
     }
     catch (Exception e)
     {
@@ -238,15 +226,47 @@ OutdatedPackage[] getOutdatedPackages(bool includeAur = true,
     return result;
 }
 
-SearchResult[] searchAny(string[] terms, PackageSource source = PackageSource.any)
+SearchResult[] searchAny(string[] terms, PackageSource source = PackageSource.any,
+        bool useParu = false)
 {
     SearchResult[] results;
+
+    // If the caller requested using paru, use the combined search (repos + AUR) like paru -Ss does
+    if (useParu)
+    {
+        // Use the same approach as paru -Ss: search both repos and AUR
+        if (source == PackageSource.repo || source == PackageSource.any)
+        {
+            try
+            {
+                results ~= searchRepo(terms, useParu);
+            }
+            catch (Exception)
+            {
+                // Tolerate repo search errors
+            }
+        }
+
+        if (source == PackageSource.aur || source == PackageSource.any)
+        {
+            try
+            {
+                results ~= search(terms, useParu);
+            }
+            catch (Exception)
+            {
+                // Tolerate AUR/network errors
+            }
+        }
+
+        return results;
+    }
 
     if (source == PackageSource.repo || source == PackageSource.any)
     {
         try
         {
-            results ~= searchRepo(terms);
+            results ~= searchRepo(terms, useParu);
         }
         catch (Exception)
         {
@@ -258,7 +278,7 @@ SearchResult[] searchAny(string[] terms, PackageSource source = PackageSource.an
     {
         try
         {
-            results ~= search(terms);
+            results ~= search(terms, useParu);
         }
         catch (Exception)
         {

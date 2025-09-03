@@ -1,40 +1,6 @@
 module terminal.commands.upgrade;
 
-import std.algorithm;
-import std.array;
-import std.process;
-import std.stdio;
-import std.string;
-import std.path;
-import std.file;
-import std.format;
-import std.conv;
-import std.algorithm.sorting;
-
-import terminal.args;
-import terminal.options;
-import terminal.ui;
-import terminal.colors;
-import terminal.prompt;
-import terminal.apply;
-import config.loader;
-import config.parser;
-import config.paths;
-import utils.process;
-import utils.common;
-import utils.selection;
-import config.write;
-import packages.packages;
-import packages.pacman;
-import packages.aur;
-import packages.types;
-import systems.dotfiles;
-import systems.env;
-import systems.setup;
-import systems.services;
-import utils.sh;
-import packages.state;
-import packages.pkgbuild;
+import terminal.commands.common_imports;
 
 /// Run upgrade command - upgrade all packages to latest versions
 int runUpgradeCommand(const CommandCall cc)
@@ -56,11 +22,14 @@ int runUpgradeCommand(const CommandCall cc)
     options.sync = sync;
     options.verbose = verbose;
     options.noSpinner = noSpinner;
+    options.paru = true;
+    if ("no-paru" in cc.flags)
+        options.paru = false;
 
     // Upgrade all repo packages (no filtering by managed status)
     import terminal.commands.apply : applySystemUpgrade;
 
-    applySystemUpgrade(options, false);
+    applySystemUpgrade(options, false, options.paru);
 
     // Upgrade AUR packages if not disabled
     if (!noAur)

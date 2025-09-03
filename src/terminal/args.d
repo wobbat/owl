@@ -13,30 +13,30 @@ struct CommandCall
 // Parses args into CommandCall, using defaultCommand if first arg is a flag or missing
 CommandCall parseCommandCall(string[] args, string defaultCommand = "apply")
 {
-    CommandCall cc;
-    size_t i = 0;
+    CommandCall result;
+    size_t argIndex = 0;
     if (args.length == 0 || args[0].startsWith("--"))
     {
-        cc.command = defaultCommand;
+        result.command = defaultCommand;
     }
     else
     {
-        cc.command = args[0];
-        i = 1;
+        result.command = args[0];
+        argIndex = 1;
     }
-    for (; i < args.length; ++i)
+    for (; argIndex < args.length; ++argIndex)
     {
-        auto arg = args[i];
+        auto arg = args[argIndex];
         if (arg.startsWith("--"))
         {
-            cc.flags[arg[2 .. $]] = true;
+            result.flags[arg[2 .. $]] = true;
         }
         else
         {
-            cc.arguments ~= arg;
+            result.arguments ~= arg;
         }
     }
-    return cc;
+    return result;
 }
 
 // Utility for top-level flag detection

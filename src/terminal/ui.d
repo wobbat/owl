@@ -446,15 +446,17 @@ void printTopLevelHelp()
     auto ui = HelpUI(true);
     ui.header("Usage");
     ui.para("  owl [--help] [--version]");
-    ui.para("  owl apply [--no-aur] [--dev] [--repo <name>]");
-    ui.para("  owl [--no-aur] [--dev] [--repo <name>]   # defaults to 'apply'");
-    ui.para("  owl upgrade [--dev]   # --dev includes VCS packages (-git, -hg, etc.)");
+    ui.para("  owl apply [--no-aur] [--dev] [--no-paru] [--repo <name>]");
+    ui.para("  owl [--no-aur] [--dev] [--no-paru] [--repo <name>]   # defaults to 'apply'");
+    ui.para("  owl upgrade [--dev] [--no-paru]   # --dev includes VCS packages (-git, -hg, etc.)");
     ui.blank();
 
     ui.header("Description");
     ui.subheader("Top level flags");
     ui.row("  --help, -h", "Show this help and exit");
     ui.row("  --version, -v", "Show version and exit");
+    ui.row("  --paru", "Use paru for package operations (default when available)");
+    ui.row("  --no-paru", "Do not use paru for package operations");
     ui.blank();
 
     ui.subheader("Commands");
@@ -475,6 +477,7 @@ void printTopLevelHelp()
     ui.header("Examples");
     ui.para("  owl --version");
     ui.para("  owl apply --no-aur");
+    ui.para("  owl apply --no-paru   # Do not use paru for package operations");
     ui.para("  owl --no-aur");
     ui.para("  owl upgrade --dev   # Include VCS packages");
 }

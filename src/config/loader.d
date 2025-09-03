@@ -9,13 +9,13 @@ import config.parser;
 
 private string[] collectGroupFiles(string root, string filePath, string[string] visited)
 {
-    string[] acc;
+    string[] configFiles;
     if (!exists(filePath))
-        return acc;
+        return configFiles;
     if (filePath in visited)
-        return acc;
+        return configFiles;
     visited[filePath] = "1";
-    acc ~= filePath;
+    configFiles ~= filePath;
     auto text = cast(string) read(filePath);
     foreach (rawLine; text.split("\n"))
     {
@@ -23,43 +23,43 @@ private string[] collectGroupFiles(string root, string filePath, string[string] 
         auto line = idx >= 0 ? rawLine[0 .. idx].strip : rawLine.strip;
         if (line.startsWith("@group"))
         {
-            auto name = line[6 .. $].strip;
-            if (name.length > 0)
+            auto groupName = line[6 .. $].strip;
+            if (groupName.length > 0)
             {
-                auto gp = buildPath(root, "groups", name ~ ".owl");
-                acc ~= collectGroupFiles(root, gp, visited);
+                auto groupPath = buildPath(root, "groups", groupName ~ ".owl");
+                configFiles ~= collectGroupFiles(root, groupPath, visited);
             }
         }
     }
-    return acc;
+    return configFiles;
 }
 
 public ConfigResult loadConfigChain(string root, string hostname)
 {
     string[string] visited;
-    string[] acc;
-    auto main = buildPath(root, "main.owl");
-    auto host = buildPath(root, hostname ~ ".owl");
-    auto host2 = buildPath(root, "hosts", hostname ~ ".owl");
-    if (exists(main))
-        acc ~= collectGroupFiles(root, main, visited);
-    if (exists(host))
-        acc ~= collectGroupFiles(root, host, visited);
-    if (exists(host2))
-        acc ~= collectGroupFiles(root, host2, visited);
-    ConfigResult merged;
-    foreach (f; acc)
+    string[] configFiles;
+    auto mainConfigPath = buildPath(root, "main.owl");
+    auto hostConfigPath = buildPath(root, hostname ~ ".owl");
+    auto altHostConfigPath = buildPath(root, "hosts", hostname ~ ".owl");
+    if (exists(mainConfigPath))
+        configFiles ~= collectGroupFiles(root, mainConfigPath, visited);
+    if (exists(hostConfigPath))
+        configFiles ~= collectGroupFiles(root, hostConfigPath, visited);
+    if (exists(altHostConfigPath))
+        configFiles ~= collectGroupFiles(root, altHostConfigPath, visited);
+    ConfigResult mergedConfig;
+    foreach (configFile; configFiles)
     {
-        auto part = parseConfigFile(f);
+        auto partialConfig = parseConfigFile(configFile);
         // Annotate each entry with its source file
-        foreach (ref e; part.entries)
+        foreach (ref entry; partialConfig.entries)
         {
-            e.sourceFile = f;
-            merged.entries ~= e;
+            entry.sourceFile = configFile;
+            mergedConfig.entries ~= entry;
         }
-        foreach (k, v; part.globalEnvs)
-            merged.globalEnvs[k] = v;
-        merged.globalScripts ~= part.globalScripts;
+        foreach (key, value; partialConfig.globalEnvs)
+            mergedConfig.globalEnvs[key] = value;
+        mergedConfig.globalScripts ~= partialConfig.globalScripts;
     }
-    return merged;
+    return mergedConfig;
 }

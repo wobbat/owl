@@ -14,6 +14,7 @@ struct CommandOptions
     bool safety;
     bool noAur;
     bool sync;
+    bool paru; // use paru instead of pacman when available
 
     // Common flags
     string exact;
@@ -40,6 +41,9 @@ CommandOptions parseCommandOptions(const bool[string] flags, const string[] argu
 {
     CommandOptions opts;
 
+    // Set defaults
+    opts.paru = true;
+
     // Parse flags
     if ("no-spinner" in flags)
         opts.noSpinner = true;
@@ -59,6 +63,10 @@ CommandOptions parseCommandOptions(const bool[string] flags, const string[] argu
         opts.noAur = true;
     if ("sync" in flags)
         opts.sync = true;
+    if ("paru" in flags)
+        opts.paru = true;
+    if ("no-paru" in flags)
+        opts.paru = false;
     if ("yes" in flags)
         opts.yes = true;
     if ("json" in flags)

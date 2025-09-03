@@ -79,7 +79,7 @@ void showAnalysisPhase(ref ApplyContext ctx)
 
     if (ctx.dotPkgCount > 0)
     {
-        writeln("  dotfiles: " ~ to!string(ctx.dotPkgCount));
+        writeln(dim("  dotfiles: ") ~ to!string(ctx.dotPkgCount));
         writeln("");
     }
 }
@@ -112,26 +112,48 @@ void showDebugInfo(ApplyContext ctx)
 
 int handleDryRun(ApplyContext ctx)
 {
+    // Dry-run: print top-level sections to mirror real run order
+    sectionHeader("Pkg management", "green");
     showPackageDryRun(ctx);
+
+    sectionHeader("Config", "magenta");
     showConfigDryRun(ctx);
+
+    sectionHeader("Services", "teal");
     showServicesDryRun(ctx);
+
+    sectionHeader("Environment", "orange");
     showEnvironmentDryRun(ctx);
+
     return 0;
 }
 
 int executeApply(ApplyContext ctx)
 {
+    // Top-level sections are printed here to keep flow consistent
+    sectionHeader("Pkg management", "green");
     handlePackageManagement(ctx);
+
+    sectionHeader("Config", "magenta");
     handleConfigManagement(ctx);
-    handleSetupScripts(ctx);
+
+    if (ctx.analysis.allSetups.length > 0)
+    {
+        sectionHeader("Setup", "green");
+        handleSetupScripts(ctx);
+    }
+
+    sectionHeader("Services", "teal");
     handleServices(ctx);
+
+    sectionHeader("Environment", "orange");
     handleEnvironment(ctx);
+
     return 0;
 }
 
 void handlePackageManagement(ApplyContext ctx)
 {
-    sectionHeader("Pkg management", "green");
 
     auto spinnerCtx = SpinnerContext(ctx.options);
     auto allOutdated = withSpinner("Checking for package upgrades...", spinnerCtx, () {
@@ -175,7 +197,6 @@ void handlePackageManagement(ApplyContext ctx)
         handlePackageInstallation(ctx);
     }
 
-    updateManagedPackages(ctx.analysis.uniquePackages);
 }
 
 void handlePackageRemoval(ApplyContext ctx)
@@ -185,7 +206,7 @@ void handlePackageRemoval(ApplyContext ctx)
     {
         writeln("  " ~ errorText("remove") ~ " Removing: " ~ packageName(name));
     }
-    removeUnmanagedPackages(ctx.toRemove, !ctx.options.verbose);
+    removeUnmanagedPackages(ctx.toRemove, !ctx.options.verbose, ctx.options.paru);
     showPackagesRemoved(cast(int) ctx.toRemove.length);
 }
 
@@ -202,11 +223,11 @@ void handleUpgrades(ApplyContext ctx, OutdatedPackage[] allOutdated)
         auto aurOutdated = allOutdated.filter!(p => p.source == "aur").array;
         if (aurOutdated.length > 0)
         {
-            applyAurUpgrades(ctx.options, aurOutdated);
+            applyAurUpgrades(ctx.options, aurOutdated, ctx.options.paru);
         }
         if (ctx.options.dev)
         {
-            applyVcsUpgrades(ctx.options);
+            applyVcsUpgrades(ctx.options, ctx.options.paru);
         }
     }
 }
@@ -225,7 +246,18 @@ void handlePackageInstallation(ApplyContext ctx)
 
 void installPackage(string name, ApplyContext ctx, ProgressCallback progress)
 {
-    int codeRepo = installRepoPackages([name], true, true, progress, null);
+    // Skip if paru is already installed
+    if (name == "paru")
+    {
+        import packages.pacman : isParuInstalled;
+        if (isParuInstalled())
+        {
+            progress("Paru is already installed");
+            return;
+        }
+    }
+
+    int codeRepo = installRepoPackages([name], true, true, progress, null, ctx.options.paru);
     if (codeRepo == 0)
     {
         progress("Successfully installed " ~ name ~ " from official repositories");
@@ -236,7 +268,8 @@ void installPackage(string name, ApplyContext ctx, ProgressCallback progress)
     {
         import packages.aur_build;
 
-        if (buildAndInstallAurPackage(name, progress, ctx.options.safety, !ctx.options.unsafe))
+        if (buildAndInstallAurPackage(name, progress, ctx.options.safety,
+                !ctx.options.unsafe, ctx.options.paru))
         {
             progress("Successfully installed " ~ name ~ " from AUR");
         }
@@ -253,7 +286,8 @@ void installPackage(string name, ApplyContext ctx, ProgressCallback progress)
 
 void handleConfigManagement(ApplyContext ctx)
 {
-    configManagementHeader();
+    // 'Config' section header is printed at the top-level; print the subheading
+    writeln("  Config management:");
 
     if (ctx.dotPkgCount > 0)
     {
@@ -357,7 +391,6 @@ void handleServices(ApplyContext ctx)
 {
     if (ctx.analysis.allServices.length > 0)
     {
-        sectionHeader("Services", "teal");
         auto svspin = newSpinner("Validating services...",
                 !ctx.options.noSpinner && !ctx.options.verbose);
 
@@ -395,8 +428,6 @@ void handleEnvironment(ApplyContext ctx)
 {
     if (ctx.analysis.allEnvs.length > 0)
     {
-        sectionHeader("Environment", "orange");
-
         import systems.env;
 
         string[2][] allEnvironmentVars;
@@ -479,7 +510,7 @@ void showPackageDryRun(ApplyContext ctx)
 
 void showConfigDryRun(ApplyContext ctx)
 {
-    configManagementHeader();
+    // 'Config' section header is printed at the top-level for dry-run
 
     if (ctx.dotPkgCount > 0)
     {
@@ -511,9 +542,9 @@ void showConfigDryRun(ApplyContext ctx)
 
 void showServicesDryRun(ApplyContext ctx)
 {
+    // 'Services' header printed at top-level for dry-run
     if (ctx.analysis.allServices.length > 0)
     {
-        sectionHeader("Services", "teal");
         writeln("  Plan:");
         foreach (svc; ctx.analysis.allServices)
         {
@@ -527,9 +558,9 @@ void showServicesDryRun(ApplyContext ctx)
 
 void showEnvironmentDryRun(ApplyContext ctx)
 {
+    // 'Environment' header printed at top-level for dry-run
     if (ctx.analysis.allEnvs.length > 0 || ctx.analysis.conf.globalEnvs.length > 0)
     {
-        sectionHeader("Environment", "orange");
         if (ctx.analysis.allEnvs.length > 0)
         {
             writeln("Environment variables to set:");

@@ -1,40 +1,6 @@
 module terminal.commands.apply;
 
-import std.algorithm;
-import std.array;
-import std.process;
-import std.stdio;
-import std.string;
-import std.path;
-import std.file;
-import std.format;
-import std.conv;
-import std.algorithm.sorting;
-
-import terminal.args;
-import terminal.options;
-import terminal.ui;
-import terminal.colors;
-import terminal.prompt;
-import terminal.apply;
-import config.loader;
-import config.parser;
-import config.paths;
-import utils.process;
-import utils.common;
-import utils.selection;
-import config.write;
-import packages.packages;
-import packages.pacman;
-import packages.aur;
-import packages.types;
-import systems.dotfiles;
-import systems.env;
-import systems.setup;
-import systems.services;
-import utils.sh;
-import packages.state;
-import packages.pkgbuild;
+import terminal.commands.common_imports;
 
 struct ConfigAnalysis
 {
@@ -101,7 +67,7 @@ int runApplyCommand(const CommandCall cc)
     return executeApply(ctx);
 }
 
-void applySystemUpgrade(CommandOptions options, bool nothingToInstall)
+void applySystemUpgrade(CommandOptions options, bool nothingToInstall, bool useParu = false)
 {
     // Upgrade repo packages (no listing here; combined list is shown earlier)
     auto sp = newSpinner("Upgrading system packages...", !options.noSpinner && !options.verbose);
@@ -124,14 +90,14 @@ void applySystemUpgrade(CommandOptions options, bool nothingToInstall)
 
     try
     {
-        auto pm = initPacmanManager();
+        auto pm = initPacmanManager(false, false, false, options.paru);
         if (options.sync)
         {
-            syncDatabases(true, cb, onTick);
+            syncDatabases(true, cb, onTick, options.paru);
         }
         else
         {
-            syncDatabases(false, cb, onTick);
+            syncDatabases(false, cb, onTick, options.paru);
         }
         upgradeSystem(pm, options.verbose, cb, onTick);
 
@@ -153,7 +119,7 @@ void applySystemUpgrade(CommandOptions options, bool nothingToInstall)
     }
 }
 
-void applyAurUpgrades(CommandOptions options, OutdatedPackage[] aurPkgs)
+void applyAurUpgrades(CommandOptions options, OutdatedPackage[] aurPkgs, bool useParu = false)
 {
     if (aurPkgs.length == 0)
         return;
@@ -206,7 +172,7 @@ void applyAurUpgrades(CommandOptions options, OutdatedPackage[] aurPkgs)
                     sp.update(msg);
             };
 
-            if (buildAndInstallAurPackage(p.name, progress, options.safety, false))
+            if (buildAndInstallAurPackage(p.name, progress, options.safety, false, useParu))
             {
                 if (!options.verbose)
                     sp.stop("installed");
@@ -224,7 +190,7 @@ void applyAurUpgrades(CommandOptions options, OutdatedPackage[] aurPkgs)
     }
 }
 
-void applyVcsUpgrades(CommandOptions options)
+void applyVcsUpgrades(CommandOptions options, bool useParu = false)
 {
     if (options.noAur || !options.dev)
         return;
@@ -244,8 +210,7 @@ void applyVcsUpgrades(CommandOptions options)
     foreach (pkg; foreign)
     {
         string name = pkg[0];
-        if (name.endsWith("-git") || name.endsWith("-hg")
-                || name.endsWith("-svn") || name.endsWith("-bzr"))
+        if (isVCSPackage(name))
         {
             vcsPkgs ~= name;
         }
@@ -269,7 +234,7 @@ void applyVcsUpgrades(CommandOptions options)
                     sp.update(msg);
             };
 
-            if (buildAndInstallAurPackage(name, progress, false, false))
+            if (buildAndInstallAurPackage(name, progress, false, false, useParu))
             {
                 if (!options.verbose)
                     sp.stop("installed");

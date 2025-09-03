@@ -17,10 +17,9 @@ int displayCountdownSelection(T)(T[] items, string delegate(T, size_t) formatter
         return 0;
     }
 
-    foreach (size_t num; 1 .. items.length + 1)
+    foreach (size_t i; 0 .. items.length)
     {
-        size_t idx = items.length - num;
-        writeln(formatter(items[idx], num));
+        writeln(formatter(items[i], i + 1));
     }
     writeln("");
 
@@ -49,7 +48,7 @@ int mapCountdownSelection(int selection, int totalItems)
     {
         return -1;
     }
-    return totalItems - selection;
+    return selection - 1;
 }
 
 struct SelectionResult(T)
