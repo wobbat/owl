@@ -16,7 +16,7 @@ import terminal.options;
 import terminal.ui;
 import terminal.colors;
 import terminal.prompt;
-import terminal.apply;
+import terminal.commands.apply;
 import config.loader;
 import config.parser;
 import config.paths;

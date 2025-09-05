@@ -18,7 +18,7 @@ public import terminal.options;
 public import terminal.ui;
 public import terminal.colors;
 public import terminal.prompt;
-public import terminal.apply;
+
 
 // Config module imports
 public import config.loader;

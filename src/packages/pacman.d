@@ -10,7 +10,20 @@ import utils.sh;
 import packages.types;
 
 // Global process tracking for cleanup
-private int[] activePacmanProcessIDs;
+private struct ProcessTracker {
+    int[] pids;
+
+    void register(int pid) {
+        pids ~= pid;
+    }
+
+    void unregister(int pid) {
+        import std.algorithm.mutation : remove;
+        pids = pids.remove!(p => p == pid);
+    }
+}
+
+private ProcessTracker pacmanTracker;
 
 // Signal handler setup to clean up processes
 static this() {
@@ -19,7 +32,7 @@ static this() {
 
     extern (C) void signalHandler(int sig) nothrow @nogc @system {
         // Kill any active pacman processes
-        foreach (pid; activePacmanProcessIDs) {
+        foreach (pid; pacmanTracker.pids) {
             try {
                 kill(pid, SIGTERM);
             } catch (Exception) {
@@ -72,20 +85,21 @@ void installParu() {
     try {
         // Clean up any existing directory first
         writeln("Cleaning up any existing paru build directory...");
-        auto cleanupPipes = pipeProcess(["rm", "-rf", "/tmp/paru"], 
-                                       Redirect.stdout | Redirect.stderr);
+        auto cleanupPipes = pipeProcess(["rm", "-rf", "/tmp/paru"],
+                Redirect.stdout | Redirect.stderr);
         wait(cleanupPipes.pid);
 
         // Clone the repo
         writeln("Cloning paru repository...");
-        auto clonePipes = pipeProcess(["git", "clone", "https://aur.archlinux.org/paru.git", "/tmp/paru"], 
-                                     Redirect.stdout | Redirect.stderr);
-        
+        auto clonePipes = pipeProcess([
+            "git", "clone", "https://aur.archlinux.org/paru.git", "/tmp/paru"
+        ], Redirect.stdout | Redirect.stderr);
+
         // Stream output to user
         foreach (line; clonePipes.stdout.byLine) {
             writeln(line);
         }
-        
+
         auto cloneStatus = wait(clonePipes.pid);
         if (cloneStatus != 0) {
             throw new Exception("Failed to clone paru repo");
@@ -93,14 +107,14 @@ void installParu() {
 
         // Build and install in the directory
         writeln("Building and installing paru...");
-        auto buildPipes = pipeProcess(["makepkg", "-si", "--noconfirm"], 
-                                     Redirect.stdout | Redirect.stderr, null, Config.none, "/tmp/paru");
-        
+        auto buildPipes = pipeProcess(["makepkg", "-si", "--noconfirm"],
+                Redirect.stdout | Redirect.stderr, null, Config.none, "/tmp/paru");
+
         // Stream output to user
         foreach (line; buildPipes.stdout.byLine) {
             writeln(line);
         }
-        
+
         auto buildStatus = wait(buildPipes.pid);
         if (buildStatus != 0) {
             throw new Exception("Failed to build paru");
@@ -110,7 +124,7 @@ void installParu() {
         writeln("Cleaning up...");
         auto rmPipes = pipeProcess(["rm", "-rf", "/tmp/paru"], Redirect.stdout | Redirect.stderr);
         wait(rmPipes.pid); // Don't check status for cleanup
-        
+
         writeln("Paru installation completed successfully!");
     } catch (Exception e) {
         writeln("Failed to install paru: ", e.msg);
@@ -133,47 +147,84 @@ int runPacman(string[] args, ProgressCallback onLine = null, bool useParu = fals
     return runPacmanStream(args, onLine, null, useParu);
 }
 
-int runPacmanStream(string[] args, ProgressCallback onLine = null,
-        void delegate() onTick = null, bool useParu = false) {
-    string[] cmd;
-
-    // Check if paru should be used and is available
+private string[] buildPacmanCommand(string[] args, bool useParu) {
     bool paruAvailable = false;
     if (useParu) {
         paruAvailable = ensureParuAvailable();
     }
 
-    // Choose between paru and pacman
     string packageManager = paruAvailable ? "paru" : "pacman";
 
     // Prefer running via sudo if available (only for pacman, paru handles sudo internally)
     try {
         string output = run("which sudo");
         if (output.length > 0 && !paruAvailable) {
-            cmd = ["sudo", packageManager] ~ args;
+            return ["sudo", packageManager] ~ args;
         } else {
-            cmd = [packageManager] ~ args;
+            return [packageManager] ~ args;
         }
     } catch (Exception) {
-        cmd = [packageManager] ~ args;
+        return [packageManager] ~ args;
+    }
+}
+
+private int streamProcessOutput(T)(T pipe, ProgressCallback onLine, void delegate() onTick) {
+    import core.time : dur, MonoTime;
+    import core.thread : Thread;
+
+    auto lastTickTime = MonoTime.currTime();
+    enum tickIntervalMs = 80;
+    enum idleSleepMs = 10;
+
+    char[] lineBuffer;
+    while (pipe.pid.tryWait().terminated == false || !pipe.stdout.eof()) {
+        bool gotLine = false;
+
+        // Try to read a line without blocking
+        try {
+            if (pipe.stdout.readln(lineBuffer)) {
+                gotLine = true;
+                if (onLine) {
+                    onLine(lineBuffer.idup.chomp());
+                }
+            }
+        } catch (Exception) {
+            // End of stream or error
+            break;
+        }
+
+        // Check if we should tick
+        auto now = MonoTime.currTime();
+        if (onTick && (now - lastTickTime) >= dur!"msecs"(tickIntervalMs)) {
+            onTick();
+            lastTickTime = now;
+        }
+
+        // If we didn't get a line, sleep briefly to avoid busy waiting
+        if (!gotLine) {
+            Thread.sleep(dur!"msecs"(idleSleepMs));
+        }
     }
 
-    try {
-        import core.time : dur, MonoTime;
-        import core.thread : Thread;
+    // Wait for process to complete
+    return wait(pipe.pid);
+}
 
+int runPacmanStream(string[] args, ProgressCallback onLine = null,
+        void delegate() onTick = null, bool useParu = false) {
+    string[] cmd = buildPacmanCommand(args, useParu);
+
+    try {
         // Use pipeProcess for better control and cleanup
         auto pipes = pipeProcess(cmd, Redirect.stdout | Redirect.stderr);
 
         // Track this process for cleanup
         int pidNum = pipes.pid.processID;
-        activePacmanProcessIDs ~= pidNum;
+        pacmanTracker.register(pidNum);
 
         scope (exit) {
             // Remove from tracking when done
-            import std.algorithm.mutation : remove;
-
-            activePacmanProcessIDs = activePacmanProcessIDs.remove!(p => p == pidNum);
+            pacmanTracker.unregister(pidNum);
         }
 
         scope (failure) {
@@ -187,46 +238,9 @@ int runPacmanStream(string[] args, ProgressCallback onLine = null,
             }
         }
 
-        // Stream processing with tick support
-        auto lastTickTime = MonoTime.currTime();
-        enum tickIntervalMs = 80;
-        enum idleSleepMs = 10;
-
-        char[] lineBuffer;
-        while (pipes.pid.tryWait().terminated == false || !pipes.stdout.eof()) {
-            bool gotLine = false;
-
-            // Try to read a line without blocking
-            try {
-                if (pipes.stdout.readln(lineBuffer)) {
-                    gotLine = true;
-                    if (onLine) {
-                        onLine(lineBuffer.idup.chomp());
-                    }
-                }
-            } catch (Exception) {
-                // End of stream or error
-                break;
-            }
-
-            // Check if we should tick
-            auto now = MonoTime.currTime();
-            if (onTick && (now - lastTickTime) >= dur!"msecs"(tickIntervalMs)) {
-                onTick();
-                lastTickTime = now;
-            }
-
-            // If we didn't get a line, sleep briefly to avoid busy waiting
-            if (!gotLine) {
-                Thread.sleep(dur!"msecs"(idleSleepMs));
-            }
-        }
-
-        // Wait for process to complete
-        auto result = wait(pipes.pid);
-        return result;
+        return streamProcessOutput(pipes, onLine, onTick);
     } catch (Exception e) {
-        stderr.writeln("Error running " ~ packageManager ~ ": ", e.msg);
+        stderr.writeln("Error running pacman/paru: ", e.msg);
         return 1;
     }
 }
@@ -364,6 +378,7 @@ int installRepoPackages(string[] names, bool assumeYes = false, bool needed = fa
 
     // Avoid circular dependency: don't use paru to install paru
     import std.algorithm : canFind;
+
     if (names.canFind("paru")) {
         useParu = false;
     }

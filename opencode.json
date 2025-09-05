@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "mini": {
+      "mode": "primary",
+      "model": "github-copilot/gpt-5-mini",
+      "prompt": "{file:./codex.txt}",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      }
+    },
+    }
+}

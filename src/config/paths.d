@@ -20,11 +20,6 @@ enum OwlPaths : string
     DotfilesDir = "~/.owl/dotfiles"
 }
 
-// Helper functions for path operations
-string owlPath(OwlPaths path)
-{
-    return expandTilde(cast(string) path);
-}
 
 string owlConfigRoot()
 {
@@ -56,20 +51,5 @@ string owlDotfilesDir()
     return expandTilde(OwlPaths.DotfilesDir);
 }
 
-// Host-specific config path helper
-string owlHostConfig(string hostname)
-{
-    return buildPath(owlConfigRoot(), hostname ~ ".owl");
-}
 
-// Group config path helper
-string owlGroupConfig(string groupName)
-{
-    return buildPath(owlConfigRoot(), "groups", groupName ~ ".owl");
-}
 
-// Hosts directory config path helper
-string owlHostsDirConfig(string hostname)
-{
-    return buildPath(owlConfigRoot(), "hosts", hostname ~ ".owl");
-}
