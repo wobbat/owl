@@ -56,7 +56,7 @@ pub enum Commands {
     Adopt {
         /// Packages to adopt
         items: Vec<String>,
-        /// Adopt all packages
+        /// Discover explicitly installed unmanaged packages for adoption
         #[arg(long)]
         all: bool,
     },
