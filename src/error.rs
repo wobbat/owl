@@ -37,7 +37,7 @@ pub fn handle_error(result: Result<()>) -> bool {
 /// Handle a Result by printing the error and exiting if failed
 pub fn exit_on_error(result: Result<()>) {
     if let Err(e) = result {
-        eprintln!("{}", crate::internal::color::red(&format!("Error: {}", e)));
+        eprintln!("{}", crate::internal::color::red(&e.to_string()));
         process::exit(1);
     }
 }

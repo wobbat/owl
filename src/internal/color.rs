@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 /// ANSI color codes for terminal output
 #[derive(Debug, Clone, Copy)]
 pub enum Color {

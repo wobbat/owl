@@ -42,10 +42,10 @@ fn expand_tilde(path: &str) -> String {
         if let Ok(home) = std::env::var("HOME") {
             return Path::new(&home).join(rest).to_string_lossy().into_owned();
         }
-    } else if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return home;
-        }
+    } else if path == "~"
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return home;
     }
     path.to_string()
 }

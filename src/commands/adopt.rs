@@ -263,21 +263,16 @@ fn discover_candidates_from_explicit(
 }
 
 fn get_explicitly_installed_packages() -> Result<HashSet<String>> {
-    let output = match Command::new(crate::internal::constants::PACKAGE_MANAGER)
+    let manager = crate::core::pm::package_manager_command();
+    let output = Command::new(manager)
         .args(["-Qeq"])
         .output()
-    {
-        Ok(output) => output,
-        Err(_) => Command::new("pacman")
-            .args(["-Qeq"])
-            .output()
-            .map_err(|e| anyhow!("Failed to query explicit packages: {}", e))?,
-    };
+        .map_err(|e| anyhow!("Failed to query explicit packages via {}: {}", manager, e))?;
 
     if !output.status.success() {
         return Err(anyhow!(
             "{} -Qeq failed: {}",
-            crate::internal::constants::PACKAGE_MANAGER,
+            manager,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }

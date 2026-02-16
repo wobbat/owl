@@ -1,7 +1,9 @@
 use crate::commands::{add, adopt, apply, dots, edit, find};
+use crate::error::exit_on_error;
 use crate::internal::color;
 use crate::internal::constants;
 use clap::{Parser, Subcommand};
+use std::process::{Command, Stdio};
 
 /// Global options for the CLI
 #[derive(Debug, Clone, Parser)]
@@ -109,6 +111,16 @@ impl From<&Cli> for GlobalFlags {
     }
 }
 
+fn has_pacman() -> bool {
+    Command::new("pacman")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 /// Execute the parsed command
 fn execute_command(cli: &Cli) {
     let flags = GlobalFlags::from(cli);
@@ -131,16 +143,25 @@ fn execute_command(cli: &Cli) {
     };
 
     match command {
-        Some(Commands::Apply) | None => apply::run(&flags),
+        Some(Commands::Apply) => apply::run(&flags),
+        None => {
+            if has_pacman() {
+                apply::run(&flags);
+            } else {
+                println!(
+                    "  {} pacman not found; running dotfile sync only",
+                    color::blue("info:")
+                );
+                println!();
+                dots::run(&flags);
+            }
+        }
         Some(Commands::Edit { target, argument }) => {
             let typ = match target {
                 EditTarget::Dots => constants::EDIT_TYPE_DOTS,
                 EditTarget::Config => constants::EDIT_TYPE_CONFIG,
             };
-            if let Err(err) = edit::run(typ, &argument) {
-                eprintln!("{}", color::red(&err.to_string()));
-                std::process::exit(1);
-            }
+            exit_on_error(edit::run(typ, &argument));
         }
         Some(Commands::Dots) => dots::run(&flags),
         Some(Commands::Add { items, search }) => add::run(&items, search),
@@ -148,20 +169,13 @@ fn execute_command(cli: &Cli) {
         Some(Commands::Find { query }) => find::run(&query),
         Some(Commands::ConfigCheck { file }) => {
             if let Some(f) = file {
-                if let Err(err) = crate::core::config::validator::run_configcheck(&f) {
-                    eprintln!("{}", color::red(&err.to_string()));
-                    std::process::exit(1);
-                }
-            } else if let Err(err) = crate::core::config::validator::run_full_configcheck() {
-                eprintln!("{}", color::red(&err.to_string()));
-                std::process::exit(1);
+                exit_on_error(crate::core::config::validator::run_configcheck(&f));
+            } else {
+                exit_on_error(crate::core::config::validator::run_full_configcheck());
             }
         }
         Some(Commands::ConfigHost) => {
-            if let Err(err) = crate::core::config::validator::run_confighost() {
-                eprintln!("{}", color::red(&err.to_string()));
-                std::process::exit(1);
-            }
+            exit_on_error(crate::core::config::validator::run_confighost());
         }
         Some(Commands::Clean { filename }) => {
             let result = match filename {
@@ -175,10 +189,7 @@ fn execute_command(cli: &Cli) {
                 }
                 None => crate::commands::clean::handle_clean_all(),
             };
-            if let Err(err) = result {
-                eprintln!("{}", color::red(&err.to_string()));
-                std::process::exit(1);
-            }
+            exit_on_error(result);
         }
         // These are normalized above, so they should never match here
         Some(Commands::EditDots { .. }) | Some(Commands::EditConfig { .. }) => unreachable!(),

@@ -18,10 +18,10 @@ pub fn scan_directory_for_owl_files(directory: &Path, files: &mut Vec<String>) {
     if let Ok(entries) = std::fs::read_dir(directory) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "owl") {
-                if let Some(path_str) = path.to_str() {
-                    files.push(path_str.to_string());
-                }
+            if path.extension().is_some_and(|ext| ext == "owl")
+                && let Some(path_str) = path.to_str()
+            {
+                files.push(path_str.to_string());
             }
         }
     }
@@ -85,10 +85,10 @@ pub fn get_all_config_files() -> Result<Vec<String>> {
 
     // Check main config
     let main_config = owl.join(constants::MAIN_CONFIG_FILE);
-    if main_config.exists() {
-        if let Some(path_str) = main_config.to_str() {
-            files.push(path_str.to_string());
-        }
+    if main_config.exists()
+        && let Some(path_str) = main_config.to_str()
+    {
+        files.push(path_str.to_string());
     }
 
     // Scan hosts directory

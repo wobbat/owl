@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -70,7 +70,10 @@ pub mod command {
     impl CommandSetup {
         pub fn new(command: &str, args: &[&str]) -> anyhow::Result<Self> {
             let mut cmd = Command::new(command);
-            cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.args(args)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
 
             let mut child = cmd
                 .spawn()
@@ -149,10 +152,14 @@ pub fn execute_command_with_spinner(
     let stdout = setup
         .stdout
         .ok_or_else(|| anyhow!("Failed to get child stdout"))?;
+    let stderr = setup
+        .stderr
+        .ok_or_else(|| anyhow!("Failed to get child stderr"))?;
     let current_status = Arc::new(Mutex::new(message.to_string()));
 
-    // Start thread to read and parse output
+    // Start threads to read and parse output
     start_output_reader(stdout, Arc::clone(&current_status));
+    start_output_reader(stderr, Arc::clone(&current_status));
 
     let child_clone = Arc::clone(&setup.child);
     run_with_spinner_common(
@@ -244,6 +251,23 @@ pub fn execute_command_with_stderr_capture(
         }
     };
     Ok((exit_status, stderr_output))
+}
+
+/// Execute a command interactively, inheriting terminal stdin/stdout/stderr.
+/// This allows child processes to prompt for input (e.g. y/n questions).
+pub fn execute_command_interactive(
+    command: &str,
+    args: &[&str],
+    message: &str,
+) -> anyhow::Result<std::process::ExitStatus> {
+    println!("  {} {}", crate::internal::color::blue("info:"), message);
+    Command::new(command)
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow!("Failed to run {}: {}", command, e))
 }
 
 /// Execute a command with retry logic and spinner progress display
@@ -341,10 +365,14 @@ fn execute_command_with_dynamic_spinner(
     let stdout = setup
         .stdout
         .ok_or_else(|| anyhow!("Failed to get child stdout"))?;
+    let stderr = setup
+        .stderr
+        .ok_or_else(|| anyhow!("Failed to get child stderr"))?;
     let current_status = Arc::new(Mutex::new(base_message.to_string()));
 
-    // Start thread to read and parse output
+    // Start threads to read and parse output
     start_output_reader(stdout, Arc::clone(&current_status));
+    start_output_reader(stderr, Arc::clone(&current_status));
 
     let child_clone = Arc::clone(&setup.child);
     run_with_spinner_common(
@@ -400,33 +428,99 @@ where
     )
 }
 
-fn start_output_reader(stdout: std::process::ChildStdout, status: Arc<Mutex<String>>) {
-    thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = BufReader::new(stdout);
+fn update_spinner_status(status: &Arc<Mutex<String>>, status_msg: String) {
+    match status.lock() {
+        Ok(mut guard) => *guard = status_msg,
+        Err(poisoned) => {
+            // If mutex is poisoned, try to recover
+            *poisoned.into_inner() = status_msg;
+        }
+    }
+}
 
-        for line in reader.lines().map_while(Result::ok) {
-            let line = line.trim();
-            if !line.is_empty() && !line.starts_with("::") {
-                let status_msg = if let Some(pkg) = extract_package_name(line) {
-                    if line.contains("upgrading") {
-                        format!("Upgrading {}", pkg)
-                    } else if line.contains("installing") {
-                        format!("Installing {}", pkg)
+fn is_prompt_like(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("[y/n]")
+        || lower.contains("(y/n)")
+        || lower.contains("proceed with installation?")
+        || lower.contains("continue?")
+}
+
+fn parse_status_message(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    if is_prompt_like(line) {
+        return Some(line.to_string());
+    }
+
+    if line.starts_with("::") {
+        return None;
+    }
+
+    let status_msg = if let Some(pkg) = extract_package_name(line) {
+        if line.contains("upgrading") {
+            format!("Upgrading {}", pkg)
+        } else if line.contains("installing") {
+            format!("Installing {}", pkg)
+        } else {
+            line.to_string()
+        }
+    } else {
+        line.to_string()
+    };
+    Some(status_msg)
+}
+
+fn start_output_reader<R>(stream: R, status: Arc<Mutex<String>>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut reader = io::BufReader::new(stream);
+        let mut chunk = [0u8; 1024];
+        let mut pending = String::new();
+
+        loop {
+            let bytes_read = match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+
+            pending.push_str(&String::from_utf8_lossy(&chunk[..bytes_read]));
+
+            while let Some(pos) = pending.find(|c| c == '\n' || c == '\r') {
+                let line = pending[..pos].to_string();
+                let mut drain_len = pos + 1;
+                while drain_len < pending.len() {
+                    let b = pending.as_bytes()[drain_len];
+                    if b == b'\n' || b == b'\r' {
+                        drain_len += 1;
                     } else {
-                        line.to_string()
-                    }
-                } else {
-                    line.to_string()
-                };
-                match status.lock() {
-                    Ok(mut guard) => *guard = status_msg,
-                    Err(poisoned) => {
-                        // If mutex is poisoned, try to recover
-                        *poisoned.into_inner() = status_msg;
+                        break;
                     }
                 }
+                pending.drain(..drain_len);
+
+                if let Some(status_msg) = parse_status_message(&line) {
+                    update_spinner_status(&status, status_msg);
+                }
             }
+
+            // Some prompts are not newline-terminated (e.g. "[Y/n]").
+            if is_prompt_like(&pending) {
+                let prompt = pending.trim();
+                if !prompt.is_empty() {
+                    update_spinner_status(&status, prompt.to_string());
+                }
+            }
+        }
+
+        if let Some(status_msg) = parse_status_message(&pending) {
+            update_spinner_status(&status, status_msg);
         }
     });
 }

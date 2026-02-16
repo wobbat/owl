@@ -44,8 +44,7 @@ pub fn analyze_system() -> anyhow::Result<Analysis> {
     // 1) Count upgradable packages
     let count_handle = thread::spawn(crate::core::package::get_package_count);
     // 2) Load config files
-    let config_handle =
-        thread::spawn(|| crate::core::config::Config::load_all_relevant_config_files());
+    let config_handle = thread::spawn(crate::core::config::Config::load_all_relevant_config_files);
     // 3) Load package state from disk
     let state_handle = thread::spawn(crate::core::state::PackageState::load);
     // 4) Prewarm installed package cache to avoid repeated -Q calls later

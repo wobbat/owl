@@ -29,9 +29,6 @@ pub const ENV_FISH_FILE: &str = "env.fish";
 // State management paths
 pub const STATE_DIR: &str = ".state";
 
-// Package manager
-pub const PACKAGE_MANAGER: &str = "paru";
-
 // Host name will be read from system
 pub fn get_host_name() -> Result<String> {
     std::fs::read_to_string("/etc/hostname")

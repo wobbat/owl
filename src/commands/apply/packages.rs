@@ -78,7 +78,7 @@ pub fn install_and_update_packages(
     let aur_to_update = compute_aur_updates(params.dry_run);
 
     // Install repo packages first (no confirmation needed)
-    install_repo_packages(&repo_to_install, params.dry_run);
+    install_repo_packages(&repo_to_install, params.dry_run, params.non_interactive);
 
     // Handle all AUR packages together if there are any
     if !aur_to_install.is_empty() || !aur_to_update.is_empty() {
@@ -112,7 +112,7 @@ pub fn install_and_update_packages(
     }
 
     // Update repo packages
-    update_repo_packages(params.dry_run);
+    update_repo_packages(params.dry_run, params.non_interactive);
 
     // Apply dotfile synchronization
     super::dotfiles::apply_dotfiles_with_config(config, params.dry_run);
@@ -147,7 +147,22 @@ pub fn compute_aur_updates(dry_run: bool) -> Vec<String> {
     }
 }
 
-pub fn install_repo_packages(repo_to_install: &[String], dry_run: bool) {
+fn use_pm_passthrough(non_interactive: bool) -> bool {
+    if non_interactive {
+        return false;
+    }
+
+    std::env::var("OWL_PM_PASSTHROUGH")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+pub fn install_repo_packages(repo_to_install: &[String], dry_run: bool, non_interactive: bool) {
     if repo_to_install.is_empty() {
         return;
     }
@@ -163,7 +178,16 @@ pub fn install_repo_packages(repo_to_install: &[String], dry_run: bool) {
             repo_to_install.join(", ")
         );
     } else {
-        handle_error(crate::core::pm::ParuPacman::new().install_repo(repo_to_install));
+        let pm = crate::core::pm::ParuPacman::new();
+        if use_pm_passthrough(non_interactive) {
+            println!(
+                "  {} Package manager passthrough enabled",
+                crate::internal::color::blue("info:")
+            );
+            handle_error(pm.install_repo_with_mode(repo_to_install, false));
+        } else {
+            handle_error(pm.install_repo(repo_to_install));
+        }
     }
 }
 
@@ -193,10 +217,28 @@ pub fn handle_aur_operations(
             return;
         }
         if !aur_to_install.is_empty() {
-            handle_error(crate::core::pm::ParuPacman::new().install_aur(aur_to_install));
+            let pm = crate::core::pm::ParuPacman::new();
+            if use_pm_passthrough(non_interactive) {
+                println!(
+                    "  {} Package manager passthrough enabled",
+                    crate::internal::color::blue("info:")
+                );
+                handle_error(pm.install_aur_with_mode(aur_to_install, false));
+            } else {
+                handle_error(pm.install_aur(aur_to_install));
+            }
         }
         if !aur_to_update.is_empty() {
-            handle_error(crate::core::pm::ParuPacman::new().update_aur(aur_to_update));
+            let pm = crate::core::pm::ParuPacman::new();
+            if use_pm_passthrough(non_interactive) {
+                println!(
+                    "  {} Package manager passthrough enabled",
+                    crate::internal::color::blue("info:")
+                );
+                handle_error(pm.update_aur_with_mode(aur_to_update, false));
+            } else {
+                handle_error(pm.update_aur(aur_to_update));
+            }
         }
     } else {
         println!(
@@ -206,7 +248,7 @@ pub fn handle_aur_operations(
     }
 }
 
-pub fn update_repo_packages(dry_run: bool) {
+pub fn update_repo_packages(dry_run: bool, non_interactive: bool) {
     if dry_run {
         println!(
             "  {} Would update official repository packages",
@@ -214,8 +256,14 @@ pub fn update_repo_packages(dry_run: bool) {
         );
         return;
     }
-    handle_error_with_context(
-        "update repo packages",
-        crate::core::pm::ParuPacman::new().update_repo(),
-    );
+    let pm = crate::core::pm::ParuPacman::new();
+    if use_pm_passthrough(non_interactive) {
+        println!(
+            "  {} Package manager passthrough enabled",
+            crate::internal::color::blue("info:")
+        );
+        handle_error_with_context("update repo packages", pm.update_repo_with_mode(false));
+    } else {
+        handle_error_with_context("update repo packages", pm.update_repo());
+    }
 }

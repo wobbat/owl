@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -91,15 +91,231 @@ impl ParuPacman {
     pub fn new() -> Self {
         Self
     }
+
+    pub fn install_repo_with_mode(&self, packages: &[String], non_interactive: bool) -> Result<()> {
+        if packages.is_empty() {
+            return Ok(());
+        }
+
+        let manager = package_manager_command();
+        let mut args: Vec<String> = if aur_helper_command().is_some() {
+            vec!["--repo".to_string(), "-S".to_string()]
+        } else {
+            vec!["-S".to_string()]
+        };
+        if non_interactive {
+            args.push("--noconfirm".to_string());
+        }
+        args.extend(packages.iter().cloned());
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        let status = if non_interactive {
+            crate::internal::util::execute_command_with_spinner(
+                manager,
+                &arg_refs,
+                &format!("Installing {} repo packages", packages.len()),
+            )?
+        } else {
+            crate::internal::util::execute_command_interactive(
+                manager,
+                &arg_refs,
+                &format!("Installing {} repo packages", packages.len()),
+            )?
+        };
+
+        if !status.success() {
+            return Err(anyhow::anyhow!("Repository install failed"));
+        }
+        Ok(())
+    }
+
+    pub fn install_aur_with_mode(&self, packages: &[String], non_interactive: bool) -> Result<()> {
+        if packages.is_empty() {
+            return Ok(());
+        }
+
+        let aur_helper = require_aur_helper()?;
+        let mut args = vec!["--aur".to_string(), "-S".to_string()];
+        if non_interactive {
+            args.push("--noconfirm".to_string());
+            args.push("--skipreview".to_string());
+            args.push("--noprovides".to_string());
+            args.push("--noupgrademenu".to_string());
+        }
+        args.extend(packages.iter().cloned());
+
+        let status = if non_interactive {
+            crate::internal::util::execute_command_with_retry(
+                aur_helper,
+                &args,
+                &format!("Installing {} AUR packages", packages.len()),
+                3,
+            )?
+        } else {
+            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            crate::internal::util::execute_command_interactive(
+                aur_helper,
+                &arg_refs,
+                &format!("Installing {} AUR packages", packages.len()),
+            )?
+        };
+
+        if !status.success() {
+            return Err(anyhow::anyhow!("AUR install failed"));
+        }
+        Ok(())
+    }
+
+    pub fn update_repo_with_mode(&self, non_interactive: bool) -> Result<()> {
+        let manager = package_manager_command();
+        let mut args: Vec<String> = if aur_helper_command().is_some() {
+            vec!["--repo".to_string(), "-Syu".to_string()]
+        } else {
+            vec!["-Syu".to_string()]
+        };
+        if non_interactive {
+            args.push("--noconfirm".to_string());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        let status = if non_interactive {
+            let (status, _stderr_out) = crate::internal::util::execute_command_with_stderr_capture(
+                manager,
+                &arg_refs,
+                "Updating official repository packages (syncing databases and upgrading packages)",
+            )?;
+            status
+        } else {
+            crate::internal::util::execute_command_interactive(
+                manager,
+                &arg_refs,
+                "Updating official repository packages (syncing databases and upgrading packages)",
+            )?
+        };
+
+        if status.success() {
+            println!(
+                "  {} Official repos synced",
+                crate::internal::color::green("⸎")
+            );
+            Ok(())
+        } else if aur_helper_command().is_some() && status.code() == Some(1) {
+            println!(
+                "  {} Packages from main repos have been updated",
+                crate::internal::color::green("⸎")
+            );
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Repository update failed (exit code: {:?})",
+                status.code()
+            ))
+        }
+    }
+
+    pub fn update_aur_with_mode(&self, packages: &[String], non_interactive: bool) -> Result<()> {
+        if packages.is_empty() {
+            return Ok(());
+        }
+
+        let aur_helper = require_aur_helper()?;
+        let mut args = vec!["--aur".to_string(), "-Syu".to_string()];
+        if non_interactive {
+            args.push("--noconfirm".to_string());
+        }
+        args.extend(packages.iter().cloned());
+
+        if non_interactive {
+            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (status, stderr_out) = crate::internal::util::execute_command_with_stderr_capture(
+                aur_helper,
+                &arg_refs,
+                "Updating AUR packages",
+            )
+            .map_err(|e| anyhow::anyhow!(e))?;
+            if status.success() {
+                println!(
+                    "\r\x1b[2K  {} AUR package updates completed",
+                    crate::internal::color::green("⸎")
+                );
+                Ok(())
+            } else {
+                let err = stderr_out.trim();
+                if !err.is_empty() {
+                    let take = 30usize;
+                    err.lines()
+                        .rev()
+                        .take(take)
+                        .for_each(|line| eprintln!("  {}", line));
+                }
+                Err(anyhow::anyhow!("AUR package update failed"))
+            }
+        } else {
+            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let status = crate::internal::util::execute_command_interactive(
+                aur_helper,
+                &arg_refs,
+                "Updating AUR packages",
+            )?;
+            if status.success() {
+                println!(
+                    "  {} AUR package updates completed",
+                    crate::internal::color::green("⸎")
+                );
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("AUR package update failed"))
+            }
+        }
+    }
 }
 
 // Cache for package groups to avoid repeated pacman -Sg calls
 static GROUP_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 static GROUP_PACKAGES_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+static AUR_HELPER: OnceLock<Option<String>> = OnceLock::new();
+static PACKAGE_MANAGER_COMMAND: OnceLock<String> = OnceLock::new();
+
+fn command_exists(command: &str) -> bool {
+    Command::new(command)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+pub fn aur_helper_command() -> Option<&'static str> {
+    AUR_HELPER
+        .get_or_init(|| {
+            if command_exists("paru") {
+                Some("paru".to_string())
+            } else if command_exists("yay") {
+                Some("yay".to_string())
+            } else {
+                None
+            }
+        })
+        .as_deref()
+}
+
+pub fn package_manager_command() -> &'static str {
+    PACKAGE_MANAGER_COMMAND
+        .get_or_init(|| aur_helper_command().unwrap_or("pacman").to_string())
+        .as_str()
+}
+
+fn require_aur_helper() -> Result<&'static str> {
+    aur_helper_command().ok_or_else(|| {
+        anyhow!("No AUR helper found. Install either 'paru' or 'yay' to manage AUR packages.")
+    })
+}
 
 impl PackageManager for ParuPacman {
     fn list_installed(&self) -> Result<HashSet<String>> {
-        let output = Command::new(crate::internal::constants::PACKAGE_MANAGER)
+        let manager = package_manager_command();
+        let output = Command::new(manager)
             .arg("-Qq")
             .output()
             .map_err(|e| anyhow::anyhow!("Failed to get installed packages: {}", e))?;
@@ -155,18 +371,13 @@ impl PackageManager for ParuPacman {
     }
 
     fn upgrade_count(&self) -> Result<usize> {
+        let manager = package_manager_command();
         retry_command(
             || {
-                let output = Command::new(crate::internal::constants::PACKAGE_MANAGER)
+                let output = Command::new(manager)
                     .args(["-Qu", "-q"])
                     .output()
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to run {} -Qu: {}",
-                            crate::internal::constants::PACKAGE_MANAGER,
-                            e
-                        )
-                    })?;
+                    .map_err(|e| anyhow::anyhow!("Failed to run {} -Qu: {}", manager, e))?;
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     Ok(stdout.lines().count())
@@ -175,11 +386,7 @@ impl PackageManager for ParuPacman {
                     if output.status.code() == Some(1) && stderr.trim().is_empty() {
                         Ok(0)
                     } else {
-                        Err(anyhow::anyhow!(
-                            "{} -Qu failed: {}",
-                            crate::internal::constants::PACKAGE_MANAGER,
-                            stderr
-                        ))
+                        Err(anyhow::anyhow!("{} -Qu failed: {}", manager, stderr))
                     }
                 }
             },
@@ -188,9 +395,10 @@ impl PackageManager for ParuPacman {
     }
 
     fn get_aur_updates(&self) -> Result<Vec<String>> {
+        let aur_helper = require_aur_helper()?;
         retry_command(
             || {
-                let output = Command::new(crate::internal::constants::PACKAGE_MANAGER)
+                let output = Command::new(aur_helper)
                     .args(["-Qua", "-q"])
                     .output()
                     .map_err(|e| anyhow::anyhow!("Failed to check AUR updates: {}", e))?;
@@ -222,109 +430,26 @@ impl PackageManager for ParuPacman {
     }
 
     fn install_repo(&self, packages: &[String]) -> Result<()> {
-        if packages.is_empty() {
-            return Ok(());
-        }
-        let mut args = vec!["--repo", "-S", "--noconfirm"];
-        args.extend(packages.iter().map(|s| s.as_str()));
-        let status = crate::internal::util::execute_command_with_spinner(
-            crate::internal::constants::PACKAGE_MANAGER,
-            &args,
-            &format!("Installing {} repo packages", packages.len()),
-        )?;
-        if !status.success() {
-            return Err(anyhow::anyhow!("Repository install failed"));
-        }
-        Ok(())
+        self.install_repo_with_mode(packages, true)
     }
 
     fn install_aur(&self, packages: &[String]) -> Result<()> {
-        if packages.is_empty() {
-            return Ok(());
-        }
-        let mut args = vec![
-            "--aur".to_string(),
-            "-S".to_string(),
-            "--noconfirm".to_string(),
-            "--skipreview".to_string(),
-            "--noprovides".to_string(),
-            "--noupgrademenu".to_string(),
-        ];
-        args.extend(packages.iter().cloned());
-        let status = crate::internal::util::execute_command_with_retry(
-            crate::internal::constants::PACKAGE_MANAGER,
-            &args,
-            &format!("Installing {} AUR packages", packages.len()),
-            3, // Max 3 retries
-        )?;
-        if !status.success() {
-            return Err(anyhow::anyhow!("AUR install failed"));
-        }
-        Ok(())
+        self.install_aur_with_mode(packages, true)
     }
 
     fn update_repo(&self) -> Result<()> {
-        let (status, _stderr_out) = crate::internal::util::execute_command_with_stderr_capture(
-            crate::internal::constants::PACKAGE_MANAGER,
-            &["--repo", "-Syu", "--noconfirm"],
-            "Updating official repository packages (syncing databases and upgrading packages)",
-        )?;
-        if status.success() {
-            println!(
-                "  {} Official repos synced",
-                crate::internal::color::green("⸎")
-            );
-            Ok(())
-        } else if status.code() == Some(1) {
-            println!(
-                "  {} Packages from main repos have been updated",
-                crate::internal::color::green("⸎")
-            );
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Repository update failed (exit code: {:?})",
-                status.code()
-            ))
-        }
+        self.update_repo_with_mode(true)
     }
 
     fn update_aur(&self, packages: &[String]) -> Result<()> {
-        if packages.is_empty() {
-            return Ok(());
-        }
-        let mut args = vec!["--aur", "-Syu", "--noconfirm"];
-        args.extend(packages.iter().map(|s| s.as_str()));
-        let (status, stderr_out) = crate::internal::util::execute_command_with_stderr_capture(
-            crate::internal::constants::PACKAGE_MANAGER,
-            &args,
-            "Updating AUR packages",
-        )
-        .map_err(|e| anyhow::anyhow!(e))?;
-        if status.success() {
-            println!(
-                "\r\x1b[2K  {} AUR package updates completed",
-                crate::internal::color::green("⸎")
-            );
-            Ok(())
-        } else {
-            let err = stderr_out.trim();
-            if !err.is_empty() {
-                let take = 30usize;
-                err.lines()
-                    .rev()
-                    .take(take)
-                    .for_each(|line| eprintln!("  {}", line));
-            }
-            Err(anyhow::anyhow!("AUR package update failed"))
-        }
+        self.update_aur_with_mode(packages, true)
     }
 
     fn remove_packages(&self, packages: &[String], quiet: bool) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
-        let mut cmd = Command::new(crate::internal::constants::PACKAGE_MANAGER);
+        let mut cmd = Command::new(package_manager_command());
         cmd.arg("-Rns");
         if quiet {
             cmd.arg("--noconfirm");
@@ -351,15 +476,19 @@ impl PackageManager for ParuPacman {
         }
         retry_command(
             || {
-                let mut cmd = Command::new("paru");
-                cmd.args(["-Ss", "--bottomup"]);
+                let manager = aur_helper_command().unwrap_or("pacman");
+                let mut cmd = Command::new(manager);
+                cmd.arg("-Ss");
+                if aur_helper_command().is_some() {
+                    cmd.arg("--bottomup");
+                }
                 cmd.args(terms);
                 let output = cmd
                     .output()
-                    .map_err(|e| anyhow::anyhow!("Failed to run paru search: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to run {} search: {}", manager, e))?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(anyhow::anyhow!("Paru search failed: {}", stderr));
+                    return Err(anyhow::anyhow!("{} search failed: {}", manager, stderr));
                 }
                 let text = String::from_utf8_lossy(&output.stdout);
                 parse_paru_search_output(&text)
