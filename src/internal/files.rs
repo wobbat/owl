@@ -8,7 +8,7 @@ use std::process::Command;
 use crate::internal::constants;
 
 /// Get the owl root directory (~/.owl)
-fn owl_dir() -> Result<PathBuf> {
+pub fn owl_dir() -> Result<PathBuf> {
     let home = env::var("HOME").map_err(|_| anyhow!("HOME environment variable not set"))?;
     Ok(PathBuf::from(home).join(constants::OWL_DIR))
 }
@@ -62,7 +62,7 @@ pub fn find_config_file(arg: &str) -> Result<String> {
         if path.exists() {
             return path
                 .to_str()
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .ok_or_else(|| anyhow!("Invalid path encoding"));
         }
     }
@@ -74,7 +74,7 @@ pub fn find_config_file(arg: &str) -> Result<String> {
 pub fn get_dotfile_path(filename: &str) -> Result<String> {
     let path = owl_dir()?.join(constants::DOTFILES_DIR).join(filename);
     path.to_str()
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .ok_or_else(|| anyhow!("Invalid path encoding"))
 }
 
@@ -98,4 +98,84 @@ pub fn get_all_config_files() -> Result<Vec<String>> {
     scan_directory_for_owl_files(&owl.join(constants::GROUPS_DIR), &mut files);
 
     Ok(files)
+
+/// Get the path to the main config file
+pub fn get_main_config_path() -> Result<String> {
+    let path = owl_dir()?.join(constants::MAIN_CONFIG_FILE);
+    path.to_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow!("Invalid path encoding"))
+}
+
+/// Result of adding a package to a config file
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddPackageResult {
+    Added,
+    AlreadyPresent,
+}
+
+/// Add a package to a config file
+pub fn add_package_to_file(package_name: &str, file_path: &str) -> Result<AddPackageResult> {
+    let path = Path::new(file_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow!(
+                "Failed to create config directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(path)
+            .map_err(|e| anyhow!("Failed to read config file '{}': {}", file_path, e))?
+    } else {
+        String::new()
+    };
+
+    // Check if package already exists in @packages section
+    let in_packages_section = content.lines().any(|line| {
+        line.trim() == "@packages" || line.trim() == "@pkgs"
+    });
+    if in_packages_section {
+        let mut in_section = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed == "@packages" || trimmed == "@pkgs" {
+                in_section = true;
+            } else if trimmed.starts_with('@') && trimmed != "@packages" && trimmed != "@pkgs" {
+                in_section = false;
+            } else if in_section && trimmed == package_name {
+                return Ok(AddPackageResult::AlreadyPresent);
+            }
+        }
+    }
+
+    let mut lines: Vec<String> = content.lines().map(ToString::to_string).collect();
+    let mut inserted = false;
+
+    for i in 0..lines.len() {
+        let trimmed = lines[i].trim();
+        if trimmed == "@packages" || trimmed == "@pkgs" {
+            lines.insert(i + 1, package_name.to_string());
+            inserted = true;
+            break;
+        }
+    }
+
+    if !inserted {
+        if !lines.is_empty() && !lines.last().is_some_and(String::is_empty) {
+            lines.push(String::new());
+        }
+        lines.push("@packages".to_string());
+        lines.push(package_name.to_string());
+    }
+
+    let new_content = lines.join("\n") + "\n";
+    std::fs::write(path, new_content)
+        .map_err(|e| anyhow!("Failed to write config file '{}': {}", file_path, e))?;
+
+    Ok(AddPackageResult::Added)
+}
 }

@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_parse_mixed_content() {
-        let content = r#"@package fish
+        let content = r"@package fish
 :config fish -> ~/.config/fish
 
 @packages
@@ -104,7 +104,7 @@ vi
 @package htop
 
 @env EDITOR=vim
-@group core"#;
+@group core";
 
         let config = Config::parse(content).unwrap();
 
@@ -131,7 +131,7 @@ vi
 
     #[test]
     fn test_parse_comments_and_empty_lines() {
-        let content = r#"# This is a comment
+        let content = r"# This is a comment
 
 @package test
 
@@ -141,7 +141,7 @@ vi
 @packages
 # Comment in packages section
 package1
-package2"#;
+package2";
 
         let config = Config::parse(content).unwrap();
 
@@ -250,7 +250,7 @@ package2"#;
 
     #[test]
     fn test_parse_mixed_alternative_syntax() {
-        let content = r#"@pkg fish
+        let content = r"@pkg fish
 :config fish -> ~/.config/fish
 
 @pkgs
@@ -260,7 +260,7 @@ vi
 @package htop
 
 @env EDITOR=vim
-@group core"#;
+@group core";
 
         let config = Config::parse(content).unwrap();
 

@@ -256,13 +256,13 @@ pub fn apply_dotfiles(mappings: &[DotfileMapping], dry_run: bool) -> Result<Vec<
 }
 
 pub fn print_actions(actions: &[DotfileAction], dry_run: bool) {
-    let mut _created = 0usize;
-    let mut _updated = 0usize;
+    let mut created = 0usize;
+    let mut updated = 0usize;
     let mut up_to_date = 0usize;
     for a in actions {
         match a.status {
             DotfileStatus::Create => {
-                _created += 1;
+                created += 1;
                 println!(
                     "  {} create {} -> {}",
                     crate::internal::color::green("➔"),
@@ -271,7 +271,7 @@ pub fn print_actions(actions: &[DotfileAction], dry_run: bool) {
                 );
             }
             DotfileStatus::Update => {
-                _updated += 1;
+                updated += 1;
                 println!(
                     "  {} update {} -> {}",
                     crate::internal::color::green("➔"),
@@ -286,9 +286,11 @@ pub fn print_actions(actions: &[DotfileAction], dry_run: bool) {
     }
     if !dry_run {
         println!(
-            "  {} Up to date: {} dotfiles",
+            "  {} Up to date: {} dotfiles ({} created, {} updated)",
             crate::internal::color::green("➔"),
-            up_to_date
+            up_to_date,
+            created,
+            updated
         );
     }
 }

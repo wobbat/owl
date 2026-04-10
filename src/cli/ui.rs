@@ -15,7 +15,7 @@ fn confirm_operation(
         detail_label,
         packages.join(", ")
     );
-    print!("  -> {} ", prompt);
+    print!("  -> {prompt} ");
     std::io::stdout().flush().ok();
 
     let mut input = String::new();
@@ -41,9 +41,9 @@ pub fn generate_apply_output_with_install(
     println!(
         "  packages: {} ({}, {}, {})",
         color::bold(&(package_count + uninstalled_count).to_string()),
-        color::green(&format!("install {}", uninstalled_count)),
-        color::yellow(&format!("upgrade {}", package_count)),
-        color::red(&format!("remove {}", remove_count))
+        color::green(&format!("install {uninstalled_count}")),
+        color::yellow(&format!("upgrade {package_count}")),
+        color::red(&format!("remove {remove_count}"))
     );
     println!(
         "  managed pkgs: {}",

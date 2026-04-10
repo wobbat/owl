@@ -6,7 +6,6 @@ pub mod system;
 use crate::error::handle_error_with_context;
 
 /// Run the apply command to update packages and system
-#[allow(clippy::collapsible_if)]
 pub fn run(flags: &crate::cli::handler::GlobalFlags) {
     let dry_run = flags.dry_run;
     let non_interactive = flags.non_interactive;
@@ -37,7 +36,7 @@ pub fn run(flags: &crate::cli::handler::GlobalFlags) {
         .iter()
         .filter_map(|action| match action {
             crate::core::package::PackageAction::Install { name } => Some(name.clone()),
-            _ => None,
+            crate::core::package::PackageAction::Remove { .. } => None,
         })
         .collect();
 
@@ -46,7 +45,7 @@ pub fn run(flags: &crate::cli::handler::GlobalFlags) {
         .iter()
         .filter_map(|action| match action {
             crate::core::package::PackageAction::Remove { name } => Some(name.clone()),
-            _ => None,
+            crate::core::package::PackageAction::Install { .. } => None,
         })
         .collect();
 
@@ -77,12 +76,11 @@ pub fn run(flags: &crate::cli::handler::GlobalFlags) {
         let mut changed = false;
         for pkg in &to_install {
             match crate::core::package::is_package_or_group_installed(pkg) {
-                Ok(true) => {
-                    if !analysis.state.is_managed(pkg) {
-                        analysis.state.add_managed(pkg.clone());
-                        changed = true;
-                    }
+                Ok(true) if !analysis.state.is_managed(pkg) => {
+                    analysis.state.add_managed(pkg.clone());
+                    changed = true;
                 }
+                Ok(true) => {}
                 Ok(false) => {}
                 Err(e) => {
                     handle_error_with_context(&format!("verify installation of {}", pkg), Err(e));

@@ -485,14 +485,13 @@ where
 
         loop {
             let bytes_read = match reader.read(&mut chunk) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(n) => n,
-                Err(_) => break,
             };
 
             pending.push_str(&String::from_utf8_lossy(&chunk[..bytes_read]));
 
-            while let Some(pos) = pending.find(|c| c == '\n' || c == '\r') {
+            while let Some(pos) = pending.find(['\n', '\r']) {
                 let line = pending[..pos].to_string();
                 let mut drain_len = pos + 1;
                 while drain_len < pending.len() {

@@ -19,7 +19,6 @@ pub const GROUPS_DIR: &str = "groups";
 pub const OWL_EXT: &str = ".owl";
 
 // Config filenames
-// MAIN_CONFIG_BASENAME removed; use MAIN_CONFIG_FILE directly
 pub const MAIN_CONFIG_FILE: &str = "main.owl";
 
 // Environment filenames under ~/.owl

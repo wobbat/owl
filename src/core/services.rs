@@ -62,10 +62,10 @@ pub fn ensure_services_configured(services: &[String]) -> Result<ServiceResult> 
                 {
                     Ok(status) if status.success() => {
                         result.changed = true;
-                        result.enabled_services.push(service.to_string());
+                        result.enabled_services.push(service.clone());
                     }
                     Ok(_) | Err(_) => {
-                        result.failed_services.push(service.to_string());
+                        result.failed_services.push(service.clone());
                         eprintln!(
                             "{}",
                             crate::internal::color::red(&format!(
@@ -78,7 +78,7 @@ pub fn ensure_services_configured(services: &[String]) -> Result<ServiceResult> 
                 }
             }
             Err(e) => {
-                result.failed_services.push(service.to_string());
+                result.failed_services.push(service.clone());
                 eprintln!(
                     "{}",
                     crate::internal::color::red(&format!(
@@ -102,10 +102,10 @@ pub fn ensure_services_configured(services: &[String]) -> Result<ServiceResult> 
                 {
                     Ok(status) if status.success() => {
                         result.changed = true;
-                        result.started_services.push(service.to_string());
+                        result.started_services.push(service.clone());
                     }
                     Ok(_) | Err(_) => {
-                        result.failed_services.push(service.to_string());
+                        result.failed_services.push(service.clone());
                         eprintln!(
                             "{}",
                             crate::internal::color::red(&format!(
@@ -113,12 +113,11 @@ pub fn ensure_services_configured(services: &[String]) -> Result<ServiceResult> 
                                 service
                             ))
                         );
-                        continue;
                     }
                 }
             }
             Err(e) => {
-                result.failed_services.push(service.to_string());
+                result.failed_services.push(service.clone());
                 eprintln!(
                     "{}",
                     crate::internal::color::red(&format!(
@@ -126,7 +125,6 @@ pub fn ensure_services_configured(services: &[String]) -> Result<ServiceResult> 
                         service, e
                     ))
                 );
-                continue;
             }
         }
     }

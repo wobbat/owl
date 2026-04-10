@@ -155,7 +155,7 @@ pub fn categorize_packages(packages: &[String]) -> Result<(Vec<String>, Vec<Stri
     Ok((repo_packages, aur_packages))
 }
 
-/// Search packages using the PackageManager
+/// Search packages using the `PackageManager`
 pub fn search_packages(terms: &[String]) -> Result<Vec<SearchResult>> {
     ParuPacman::new().search_packages(terms)
 }
@@ -220,7 +220,6 @@ mod tests {
         let result = pm.get_group_packages("pro-audio");
         assert!(result.is_ok());
         let packages = result.unwrap();
-        assert!(!packages.is_empty());
         // Should contain some packages
         assert!(!packages.is_empty());
     }

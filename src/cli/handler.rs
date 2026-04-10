@@ -192,7 +192,7 @@ fn execute_command(cli: &Cli) {
             exit_on_error(result);
         }
         // These are normalized above, so they should never match here
-        Some(Commands::EditDots { .. }) | Some(Commands::EditConfig { .. }) => unreachable!(),
+        Some(Commands::EditDots { .. } | Commands::EditConfig { .. }) => unreachable!(),
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::core::pm::{PackageSource, SearchResult};
 use anyhow::anyhow;
 
 /// Add items (packages) to configuration files
@@ -41,9 +42,6 @@ fn run_search_mode(terms: &[String]) {
     }
 }
 
-/// Display search results in a formatted way
-// use crate::domain::package; // no direct uses
-use crate::core::pm::{PackageSource, SearchResult};
 fn display_search_results(results: &[SearchResult]) {
     println!(
         "\n{} {} package(s):\n",
@@ -52,7 +50,7 @@ fn display_search_results(results: &[SearchResult]) {
     );
 
     for (i, result) in results.iter().enumerate() {
-        let num_str = number_brackets((results.len() - 1 - i) as i32);
+        let num_str = number_brackets(results.len() - 1 - i);
         let name = crate::internal::color::highlight(&result.name);
         let version = crate::internal::color::success(&result.ver);
 
@@ -69,13 +67,13 @@ fn display_search_results(results: &[SearchResult]) {
             String::new()
         };
 
-        let desc = if !result.description.is_empty() {
+        let desc = if result.description.is_empty() {
+            String::new()
+        } else {
             format!(
                 " - {}",
                 crate::internal::color::description(&result.description)
             )
-        } else {
-            String::new()
         };
 
         println!("{}{} {}{} {}{}", num_str, name, version, tag, status, desc);
@@ -120,35 +118,64 @@ fn prompt_package_selection(results: &[SearchResult]) -> Option<String> {
 }
 
 /// Format a number in brackets like [1], [2], etc.
-fn number_brackets(num: i32) -> String {
-    format!("[{}]", num)
+fn number_brackets(num: usize) -> String {
+    format!("[{num}]")
 }
 
 /// Add a package to the appropriate configuration file
 fn add_package_to_config(package_name: &str) -> anyhow::Result<()> {
+    use crate::internal::files::{add_package_to_file, get_main_config_path, AddPackageResult};
+
     let mut config_files = get_relevant_config_files()?;
 
     if config_files.is_empty() {
         // Use main config if no relevant files found
         let main_config = get_main_config_path()?;
-        add_package_to_file(package_name, &main_config)?;
-        println!(
-            "{}",
-            crate::internal::color::success(&format!(
-                "Added '{}' to {}",
-                package_name, main_config
-            ))
-        );
+        match add_package_to_file(package_name, &main_config)? {
+            AddPackageResult::Added => {
+                println!(
+                    "{}",
+                    crate::internal::color::success(&format!(
+                        "Added '{}' to {}",
+                        package_name, main_config
+                    ))
+                );
+            }
+            AddPackageResult::AlreadyPresent => {
+                println!(
+                    "{}",
+                    crate::internal::color::yellow(&format!(
+                        "Package '{}' already exists in {}",
+                        package_name, main_config
+                    ))
+                );
+            }
+        }
         return Ok(());
     }
 
     if config_files.len() == 1 {
         let file_path = &config_files[0];
-        add_package_to_file(package_name, file_path)?;
-        println!(
-            "{}",
-            crate::internal::color::success(&format!("Added '{}' to {}", package_name, file_path))
-        );
+        match add_package_to_file(package_name, file_path)? {
+            AddPackageResult::Added => {
+                println!(
+                    "{}",
+                    crate::internal::color::success(&format!(
+                        "Added '{}' to {}",
+                        package_name, file_path
+                    ))
+                );
+            }
+            AddPackageResult::AlreadyPresent => {
+                println!(
+                    "{}",
+                    crate::internal::color::yellow(&format!(
+                        "Package '{}' already exists in {}",
+                        package_name, file_path
+                    ))
+                );
+            }
+        }
         return Ok(());
     }
 
@@ -163,7 +190,7 @@ fn add_package_to_config(package_name: &str) -> anyhow::Result<()> {
     );
 
     for (i, file) in config_files.iter().enumerate() {
-        let num_str = number_brackets((config_files.len() - 1 - i) as i32);
+        let num_str = number_brackets(config_files.len() - 1 - i);
         let friendly = file.replace(&std::env::var("HOME").unwrap_or_default(), "~");
         println!(
             "{} {}",
@@ -177,14 +204,26 @@ fn add_package_to_config(package_name: &str) -> anyhow::Result<()> {
     match selection {
         Some(index) => {
             let file_path = &config_files[index];
-            add_package_to_file(package_name, file_path)?;
-            println!(
-                "{}",
-                crate::internal::color::success(&format!(
-                    "Added '{}' to {}",
-                    package_name, file_path
-                ))
-            );
+            match add_package_to_file(package_name, file_path)? {
+                AddPackageResult::Added => {
+                    println!(
+                        "{}",
+                        crate::internal::color::success(&format!(
+                            "Added '{}' to {}",
+                            package_name, file_path
+                        ))
+                    );
+                }
+                AddPackageResult::AlreadyPresent => {
+                    println!(
+                        "{}",
+                        crate::internal::color::yellow(&format!(
+                            "Package '{}' already exists in {}",
+                            package_name, file_path
+                        ))
+                    );
+                }
+            }
             Ok(())
         }
         None => {
@@ -200,67 +239,6 @@ fn add_package_to_config(package_name: &str) -> anyhow::Result<()> {
 /// Get relevant config files for the current system
 fn get_relevant_config_files() -> anyhow::Result<Vec<String>> {
     crate::internal::files::get_all_config_files()
-}
-
-/// Get the main config file path
-fn get_main_config_path() -> anyhow::Result<String> {
-    use std::path::PathBuf;
-    let home = std::env::var("HOME").map_err(|_| anyhow!("HOME environment variable not set"))?;
-    let path = PathBuf::from(home)
-        .join(crate::internal::constants::OWL_DIR)
-        .join(crate::internal::constants::MAIN_CONFIG_FILE);
-    Ok(path.to_string_lossy().into_owned())
-}
-
-/// Add a package to a config file
-fn add_package_to_file(package_name: &str, file_path: &str) -> anyhow::Result<()> {
-    use std::fs;
-
-    // Read existing content
-    let content = if std::path::Path::new(file_path).exists() {
-        fs::read_to_string(file_path).map_err(|e| anyhow!("Failed to read config file: {}", e))?
-    } else {
-        String::new()
-    };
-
-    // Check if package already exists
-    if content.lines().any(|line| line.trim() == package_name) {
-        return Err(anyhow!(
-            "Package '{}' already exists in {}",
-            package_name,
-            file_path
-        ));
-    }
-
-    // Add package to @packages section or create one
-    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-    let mut added = false;
-
-    // Look for @packages section
-    for i in 0..lines.len() {
-        if lines[i].trim() == "@packages" || lines[i].trim() == "@pkgs" {
-            // Add after the @packages line
-            lines.insert(i + 1, package_name.to_string());
-            added = true;
-            break;
-        }
-    }
-
-    // If no @packages section, add one at the end
-    if !added {
-        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
-            lines.push(String::new()); // Add blank line
-        }
-        lines.push("@packages".to_string());
-        lines.push(package_name.to_string());
-    }
-
-    // Write back to file
-    let new_content = lines.join("\n") + "\n";
-    fs::write(file_path, new_content)
-        .map_err(|e| anyhow!("Failed to write to config file: {}", e))?;
-
-    Ok(())
 }
 
 /// Prompt user to select a config file from search results

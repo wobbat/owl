@@ -155,7 +155,7 @@ fn optimize_config(config: &Config) -> String {
     sections
         .join("\n\n")
         .lines()
-        .map(|line| line.trim_end())
+        .map(str::trim_end)
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_optimize_config() {
-        let content = r#"@package loose1
+        let content = r"@package loose1
 
 @package withconfig
 :config test -> ~/.config/test
@@ -177,12 +177,12 @@ loose2
 loose3
 
 @env GLOBAL=val
-@group testgroup"#;
+@group testgroup";
 
         let config = Config::parse(content).unwrap();
         let optimized = optimize_config(&config);
 
-        let expected = r#"@group testgroup
+        let expected = r"@group testgroup
 
 @env GLOBAL=val
 
@@ -192,7 +192,7 @@ loose3
 @pkgs
 loose1
 loose2
-loose3"#;
+loose3";
 
         assert_eq!(optimized, expected);
     }

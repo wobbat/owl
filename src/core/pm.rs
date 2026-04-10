@@ -18,18 +18,17 @@ where
         match operation() {
             Ok(result) => return Ok(result),
             Err(err) => {
-                last_error = Some(err);
-
                 // Check if this is a network-related error that we should retry
-                let err_msg = last_error.as_ref().unwrap().to_string();
+                let err_msg = err.to_string();
                 let should_retry = err_msg.contains("Connection reset by peer")
                     || err_msg.contains("error sending request")
                     || err_msg.contains("error trying to connect")
                     || err_msg.contains("os error 104");
 
                 if !should_retry || attempt == max_retries {
-                    return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Unknown error")));
+                    return Err(err);
                 }
+                last_error = Some(err);
 
                 // Exponential backoff: 1s, 2s, 4s, 8s, 16s
                 let delay = Duration::from_secs(1 << attempt);
@@ -328,9 +327,9 @@ impl PackageManager for ParuPacman {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let installed = stdout
             .lines()
-            .map(|line| line.trim())
+            .map(str::trim)
             .filter(|name| !name.is_empty())
-            .map(|name| name.to_string())
+            .map(ToString::to_string)
             .collect::<HashSet<_>>();
         Ok(installed)
     }
@@ -357,10 +356,10 @@ impl PackageManager for ParuPacman {
                     .and_then(|rest| {
                         rest.find(':').map(|idx| {
                             let value = rest[idx + 1..].trim();
-                            if !value.is_empty() {
-                                Some(value.to_string())
-                            } else {
+                            if value.is_empty() {
                                 None
+                            } else {
+                                Some(value.to_string())
                             }
                         })
                     })
@@ -661,14 +660,14 @@ mod tests {
 
     #[test]
     fn test_parse_paru_search_output() {
-        let sample_output = r#"aur/jet-bin 0.7.27-1 [+5 ~0.00]
+        let sample_output = r"aur/jet-bin 0.7.27-1 [+5 ~0.00]
     CLI to transform between JSON, EDN and Transit, powered with a minimal query language.
 aur/clang-opencl-headers-minimal-git 21.0.0_r537041.f2e62cfca5e5-1 [+5 ~0.00]
     clang headers & include files for OpenCL, trunk version
 extra/texlive-latexextra 2025.2-2 [29.63 MiB 95.69 MiB] (texlive)
     TeX Live - LaTeX additional packages
 extra/nim 2.0.8-1 [13.08 MiB 58.55 MiB]
-    Imperative, multi-paradigm, compiled programming language"#;
+    Imperative, multi-paradigm, compiled programming language";
 
         let results = parse_paru_search_output(sample_output).unwrap();
         assert_eq!(results.len(), 4);

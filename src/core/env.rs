@@ -1,14 +1,8 @@
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
-use std::env as std_env;
 use std::fs;
-use std::path::Path;
 
-/// Get the Owl directory path
-fn owl_dir() -> Result<std::path::PathBuf> {
-    let home = std_env::var("HOME").map_err(|_| anyhow!("HOME environment variable not set"))?;
-    Ok(Path::new(&home).join(crate::internal::constants::OWL_DIR))
-}
+use crate::internal::files::owl_dir;
 
 /// Get bash environment file path
 fn env_file_bash() -> Result<std::path::PathBuf> {

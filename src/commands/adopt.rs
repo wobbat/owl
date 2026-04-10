@@ -15,11 +15,6 @@ enum PackageAction {
     Quit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AddResult {
-    Added,
-    AlreadyPresent,
-}
 
 pub fn run(items: &[String], all: bool) {
     let mut state = match PackageState::load() {
@@ -144,14 +139,14 @@ pub fn run(items: &[String], all: bool) {
                     }
                 };
 
-                match add_package_to_file(&pkg, &config_path) {
-                    Ok(AddResult::Added) => {
+                match crate::internal::files::add_package_to_file(&pkg, &config_path) {
+                    Ok(crate::internal::files::AddPackageResult::Added) => {
                         state.remove_untracked(&pkg);
                         state.add_managed(pkg.clone());
                         state_changed = true;
                         adopted.push(pkg);
                     }
-                    Ok(AddResult::AlreadyPresent) => {
+                    Ok(crate::internal::files::AddPackageResult::AlreadyPresent) => {
                         state.remove_untracked(&pkg);
                         state.add_managed(pkg.clone());
                         state_changed = true;
@@ -176,11 +171,11 @@ pub fn run(items: &[String], all: bool) {
         }
     }
 
-    if state_changed {
-        if let Err(e) = state.save() {
-            eprintln!("{}", color::red(&format!("Failed to save state: {}", e)));
-            return;
-        }
+    if state_changed
+        && let Err(e) = state.save()
+    {
+        eprintln!("{}", color::red(&format!("Failed to save state: {}", e)));
+        return;
     }
 
     if let Some(file) = selected_config {
@@ -339,10 +334,10 @@ fn prompt_config_file_selection() -> Result<Option<String>> {
             return Ok(None);
         }
 
-        if let Ok(idx) = input.parse::<usize>() {
-            if idx < config_files.len() {
-                return Ok(Some(config_files[idx].clone()));
-            }
+        if let Ok(idx) = input.parse::<usize>()
+            && idx < config_files.len()
+        {
+            return Ok(Some(config_files[idx].clone()));
         }
         println!("{}", color::red("Invalid selection, try again"));
     }
@@ -381,7 +376,7 @@ fn add_package_to_file(package_name: &str, file_path: &str) -> Result<AddResult>
         return Ok(AddResult::AlreadyPresent);
     }
 
-    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let mut lines: Vec<String> = content.lines().map(std::string::ToString::to_string).collect();
     let mut inserted = false;
 
     for i in 0..lines.len() {
@@ -394,7 +389,7 @@ fn add_package_to_file(package_name: &str, file_path: &str) -> Result<AddResult>
     }
 
     if !inserted {
-        if !lines.is_empty() && !lines.last().map(|line| line.is_empty()).unwrap_or(false) {
+        if !lines.is_empty() && !lines.last().is_some_and(String::is_empty) {
             lines.push(String::new());
         }
         lines.push("@packages".to_string());

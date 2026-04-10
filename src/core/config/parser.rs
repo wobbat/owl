@@ -121,7 +121,6 @@ impl Config {
         );
     }
 
-    #[allow(clippy::collapsible_if)]
     fn parse_config_directive(
         config: &mut Config,
         current_package: &Option<String>,
@@ -130,26 +129,21 @@ impl Config {
     ) -> Result<()> {
         let rest = line.strip_prefix(prefix).unwrap();
         if let Some((source, sink)) = rest.split_once(" -> ") {
-            if let Some(pkg_name) = current_package {
-                if let Some(package) = config.packages.get_mut(pkg_name) {
-                    // Store the full source -> destination mapping
-                    package
-                        .config
-                        .push(format!("{} -> {}", source.trim(), sink.trim()));
-                }
+            if let Some(pkg_name) = current_package
+                && let Some(package) = config.packages.get_mut(pkg_name)
+            {
+                package
+                    .config
+                    .push(format!("{} -> {}", source.trim(), sink.trim()));
             }
-        } else {
-            // Handle configs without explicit source (assume source is same as destination filename)
-            if let Some(pkg_name) = current_package {
-                if let Some(package) = config.packages.get_mut(pkg_name) {
-                    package.config.push(rest.trim().to_string());
-                }
-            }
+        } else if let Some(pkg_name) = current_package
+            && let Some(package) = config.packages.get_mut(pkg_name)
+        {
+            package.config.push(rest.trim().to_string());
         }
         Ok(())
     }
 
-    #[allow(clippy::collapsible_if)]
     fn parse_service_directive(
         config: &mut Config,
         current_package: &Option<String>,
@@ -161,29 +155,27 @@ impl Config {
             .next()
             .unwrap_or(service_part)
             .trim();
-        if let Some(pkg_name) = current_package {
-            if let Some(package) = config.packages.get_mut(pkg_name) {
-                package.service = Some(service_name.to_string());
-            }
+        if let Some(pkg_name) = current_package
+            && let Some(package) = config.packages.get_mut(pkg_name)
+        {
+            package.service = Some(service_name.to_string());
         }
         Ok(())
     }
 
-    #[allow(clippy::collapsible_if)]
     fn parse_package_env_directive(
         config: &mut Config,
         current_package: &Option<String>,
         line: &str,
     ) -> Result<()> {
         let env_part = line.strip_prefix(":env ").unwrap();
-        if let Some((key, value)) = env_part.split_once('=') {
-            if let Some(pkg_name) = current_package {
-                if let Some(package) = config.packages.get_mut(pkg_name) {
-                    package
-                        .env_vars
-                        .insert(key.trim().to_string(), value.trim().to_string());
-                }
-            }
+        if let Some((key, value)) = env_part.split_once('=')
+            && let Some(pkg_name) = current_package
+            && let Some(package) = config.packages.get_mut(pkg_name)
+        {
+            package
+                .env_vars
+                .insert(key.trim().to_string(), value.trim().to_string());
         }
         Ok(())
     }
