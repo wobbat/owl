@@ -1,4 +1,3 @@
-use crate::core::pm::PackageManager;
 use crate::error::{handle_error, handle_error_with_context};
 
 /// Parameters for package operations

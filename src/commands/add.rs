@@ -1,5 +1,4 @@
 use crate::core::pm::{PackageSource, SearchResult};
-use anyhow::anyhow;
 
 /// Add items (packages) to configuration files
 ///

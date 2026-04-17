@@ -1,7 +1,7 @@
 //! Package management utilities
 
 use crate::core::config::Config;
-use crate::core::pm::{PackageManager, ParuPacman, SearchResult};
+use crate::core::pm::{ParuPacman, SearchResult};
 use crate::core::state::PackageState;
 use anyhow::Result;
 use std::collections::HashSet;
@@ -155,7 +155,7 @@ pub fn categorize_packages(packages: &[String]) -> Result<(Vec<String>, Vec<Stri
     Ok((repo_packages, aur_packages))
 }
 
-/// Search packages using the `PackageManager`
+/// Search packages using the configured pacman/AUR backends
 pub fn search_packages(terms: &[String]) -> Result<Vec<SearchResult>> {
     ParuPacman::new().search_packages(terms)
 }

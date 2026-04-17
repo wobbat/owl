@@ -1,4 +1,3 @@
-use crate::core::pm::PackageManager;
 use anyhow::{Result, anyhow};
 
 /// Get list of AUR packages that can be updated

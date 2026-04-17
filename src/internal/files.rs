@@ -98,6 +98,7 @@ pub fn get_all_config_files() -> Result<Vec<String>> {
     scan_directory_for_owl_files(&owl.join(constants::GROUPS_DIR), &mut files);
 
     Ok(files)
+}
 
 /// Get the path to the main config file
 pub fn get_main_config_path() -> Result<String> {
@@ -134,22 +135,8 @@ pub fn add_package_to_file(package_name: &str, file_path: &str) -> Result<AddPac
         String::new()
     };
 
-    // Check if package already exists in @packages section
-    let in_packages_section = content.lines().any(|line| {
-        line.trim() == "@packages" || line.trim() == "@pkgs"
-    });
-    if in_packages_section {
-        let mut in_section = false;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed == "@packages" || trimmed == "@pkgs" {
-                in_section = true;
-            } else if trimmed.starts_with('@') && trimmed != "@packages" && trimmed != "@pkgs" {
-                in_section = false;
-            } else if in_section && trimmed == package_name {
-                return Ok(AddPackageResult::AlreadyPresent);
-            }
-        }
+    if config_contains_package(package_name, &content) {
+        return Ok(AddPackageResult::AlreadyPresent);
     }
 
     let mut lines: Vec<String> = content.lines().map(ToString::to_string).collect();
@@ -178,4 +165,10 @@ pub fn add_package_to_file(package_name: &str, file_path: &str) -> Result<AddPac
 
     Ok(AddPackageResult::Added)
 }
+
+fn config_contains_package(package_name: &str, content: &str) -> bool {
+    if let Ok(parsed) = crate::core::config::Config::parse(content) {
+        return parsed.packages.contains_key(package_name);
+    }
+    content.lines().any(|line| line.trim() == package_name)
 }

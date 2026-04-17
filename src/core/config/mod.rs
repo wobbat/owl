@@ -164,6 +164,20 @@ package2";
     }
 
     #[test]
+    fn test_package_directive_requires_name() {
+        let content = "@package ";
+        let err = Config::parse(content).unwrap_err();
+        assert!(err.to_string().contains("package directive requires a package name"));
+    }
+
+    #[test]
+    fn test_package_scoped_directive_requires_package_context() {
+        let content = ":service test-service";
+        let err = Config::parse(content).unwrap_err();
+        assert!(err.to_string().contains("outside of a package context"));
+    }
+
+    #[test]
     fn test_add_if_not_exists() {
         let mut config1 = Config::new();
         config1.packages.insert(
